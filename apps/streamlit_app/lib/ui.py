@@ -12,12 +12,9 @@ DEMO_RESULTS_LIMIT = 500
 
 def _bigquery_instructions():
     return """
-**To enable BigQuery:**
-- **Streamlit Cloud:** In app settings → Secrets, add:
-  - `gcp.project_id` — your GCP project ID
-  - `gcp.dataset` — dataset name (e.g. `pt_analytics_marts`)
-  - `gcp.service_account_json` — full service account JSON (paste the key file contents)
-- **Local:** Set `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON path, and `BQ_PROJECT`, `BQ_DATASET`.
+**To enable BigQuery (Streamlit Cloud):** In app settings → Secrets, paste the exact TOML block from the README "Streamlit Cloud" section. Required keys: `gcp_service_account`, `[bq]` with `project` and `dataset`.
+
+**Local:** Set `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON path, and `BQ_PROJECT`, `BQ_DATASET`.
 """
 
 
@@ -41,16 +38,23 @@ def render_sidebar():
             st.session_state["app_data_source"] = new_mode
             st.rerun()
 
-        # If BigQuery selected but not configured, default to Local and show friendly message
+        # If BigQuery selected, validate secrets on startup; show exact required keys if missing
         if new_mode == "bigquery":
-            client, err = bq_auth.get_bq_client()
-            project_id, dataset, creds_source = bq_auth.get_bq_config()
-            if err or client is None or not (project_id and dataset):
-                st.warning("BigQuery not configured. Using Local (demo).")
-                with st.expander("How to configure BigQuery"):
-                    st.markdown(_bigquery_instructions())
+            ok_val, validation_msg = bq_auth.validate_bigquery_secrets()
+            if not ok_val:
+                st.error("BigQuery not configured. Using Local (demo).")
+                with st.expander("Required secrets (click to see exact keys)", expanded=True):
+                    st.markdown(validation_msg)
                 st.session_state["app_data_source"] = "local"
                 st.rerun()
+            else:
+                client, err = bq_auth.get_bq_client()
+                if err or client is None:
+                    st.error(err or "BigQuery client failed. Using Local (demo).")
+                    with st.expander("Required secrets (exact keys)", expanded=True):
+                        st.code("\n".join(bq_auth.REQUIRED_SECRETS_KEYS), language="toml")
+                    st.session_state["app_data_source"] = "local"
+                    st.rerun()
 
         st.caption(data.get_active_source_label())
         ok, msg = data.ensure_data_available()
@@ -62,18 +66,24 @@ def render_sidebar():
         else:
             st.success("Data available")
 
-        # BigQuery status and verification when in BigQuery mode
+        # BigQuery status, smoke query (dim_hospital), and marts check when in BigQuery mode
         if data.get_mode() == "bigquery":
-            project_id, dataset, creds_source = bq_auth.get_bq_config()
+            project_id, dataset, location, creds_source = bq_auth.get_bq_config()
             with st.expander("BigQuery status"):
                 st.text(f"Project: {project_id}")
                 st.text(f"Dataset: {dataset}")
+                st.text(f"Location: {location}")
                 st.text(f"Credentials: {creds_source}")
-                ok_verify, msg_verify, count = bq_auth.verify_bigquery_marts()
-                if ok_verify and count is not None:
-                    st.success(f"Marts OK — fct_standard_charges_semantic: {count:,} rows")
-                elif not ok_verify:
-                    st.error(f"Marts check: {msg_verify}")
+                ok_smoke, msg_smoke, dim_count = bq_auth.smoke_query_dim_hospital()
+                if ok_smoke and dim_count is not None:
+                    st.success(f"dim_hospital: {dim_count:,} rows")
+                elif not ok_smoke:
+                    st.error(f"Smoke query (dim_hospital): {msg_smoke}")
+                ok_marts, msg_marts, marts_count = bq_auth.verify_bigquery_marts()
+                if ok_marts and marts_count is not None:
+                    st.success(f"fct_standard_charges_semantic: {marts_count:,} rows")
+                elif not ok_marts:
+                    st.error(f"Marts check: {msg_marts}")
 
         st.divider()
         st.subheader("Demo")

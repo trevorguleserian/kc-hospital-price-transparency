@@ -112,25 +112,30 @@ The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parqu
 
 ### BigQuery (Cloud)
 
-Credentials **must not** be committed. Use **Streamlit Secrets** in the app settings.
+Credentials **must not** be committed. Use **Streamlit Secrets** in the app settings so the app reads from `pricing-transparency-portfolio.pt_analytics_marts` (or your project/dataset).
 
-1. In the Cloud app → **Settings** → **Secrets**, add a TOML block with:
-   - **`gcp.project_id`** — your GCP project ID
-   - **`gcp.dataset`** — the marts dataset name (e.g. `pt_analytics_marts`)
-   - **`gcp.service_account_json`** — the **full contents** of your service account JSON key file (paste as a single JSON object or multiline string)
-
-   Example shape (do not commit real values):
+1. In the Cloud app → **Settings** → **Secrets**, add this exact TOML structure (replace the placeholder JSON with your real service account key file contents):
 
    ```toml
-   [gcp]
-   project_id = "your-gcp-project"
+   # Paste the full service account JSON as a single line or multiline string.
+   # Get it from GCP Console → IAM → Service Accounts → Keys → Create key → JSON.
+   gcp_service_account = '''
+   {"type": "service_account", "project_id": "pricing-transparency-portfolio", "private_key_id": "...", "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n", "client_email": "...", "client_id": "...", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "..."}
+   '''
+
+   [bq]
+   project = "pricing-transparency-portfolio"
    dataset = "pt_analytics_marts"
-   service_account_json = """{"type": "service_account", "project_id": "your-gcp-project", ...}"""
+   location = "US"
    ```
 
-2. Optionally set **APP_MODE=bigquery** in app settings so the app defaults to BigQuery; otherwise users can switch to BigQuery in the sidebar. If secrets are missing or invalid, the app shows “BigQuery not configured” and defaults to **Local (demo)**.
+   **Required keys:**
+   - **`gcp_service_account`** — Full contents of the service account JSON (the entire key file as one string). No local credential files on Cloud.
+   - **`[bq]`** — **`project`** (GCP project ID), **`dataset`** (marts dataset, e.g. `pt_analytics_marts`), **`location`** (optional, default `US`).
 
-3. Ensure the marts dataset and tables exist (run `scripts/run_bigquery_gold.ps1` locally or your CI with credentials, then deploy). See [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) for required tables and safe cleanup commands.
+2. Optionally set **APP_MODE=bigquery** in app settings so the app defaults to BigQuery; otherwise switch to BigQuery in the sidebar. If secrets are missing, the app shows a friendly error with these exact keys and defaults to **Local (demo)**.
+
+3. Ensure the marts dataset and tables exist (run `scripts/run_bigquery_gold.ps1` locally or in CI with credentials, then deploy). See [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) for required tables and safe cleanup commands.
 
 ### Local/Sample mode (no credentials)
 

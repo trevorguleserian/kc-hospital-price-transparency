@@ -50,18 +50,14 @@ def _local_export_dir() -> Path:
 
 def _bq_project() -> str:
     from lib import bq_auth
-    project, _dataset, _ = bq_auth.get_bq_config()
-    if project:
-        return project
-    return os.environ.get("BQ_PROJECT", "pricing-transparency-portfolio").strip()
+    project, _dataset, _loc, _ = bq_auth.get_bq_config()
+    return project or os.environ.get("BQ_PROJECT", "pricing-transparency-portfolio").strip()
 
 
 def _bq_dataset() -> str:
     from lib import bq_auth
-    _project, dataset, _ = bq_auth.get_bq_config()
-    if dataset:
-        return dataset
-    return os.environ.get("BQ_DATASET", "pt_analytics_marts").strip()
+    _project, dataset, _loc, _ = bq_auth.get_bq_config()
+    return dataset or os.environ.get("BQ_DATASET", "pt_analytics_marts").strip()
 
 
 def _bq_table(table: str) -> str:
@@ -467,12 +463,15 @@ def ensure_data_available() -> tuple[bool, str]:
             pass  # proceed to missing check; bootstrap may have failed
     if mode == "bigquery":
         from lib import bq_auth
+        ok_validation, validation_msg = bq_auth.validate_bigquery_secrets()
+        if not ok_validation:
+            return False, validation_msg
         client, err = bq_auth.get_bq_client()
         if err or client is None:
             return False, err or "BigQuery not configured."
-        project_id, dataset, _ = bq_auth.get_bq_config()
+        project_id, dataset, _loc, _ = bq_auth.get_bq_config()
         if not project_id or not dataset:
-            return False, "BigQuery not configured: set project_id and dataset in Streamlit secrets (gcp.project_id, gcp.dataset) or env (BQ_PROJECT, BQ_DATASET)."
+            return False, "BigQuery not configured: set bq.project and bq.dataset in Streamlit secrets or env BQ_PROJECT, BQ_DATASET."
         try:
             sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
             client.query(sql).result()
