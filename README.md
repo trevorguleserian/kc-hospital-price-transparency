@@ -78,14 +78,17 @@ For your own hospital files:
 
 ---
 
-## BigQuery quickstart
+## BigQuery quickstart (local)
 
-1. Set `GOOGLE_APPLICATION_CREDENTIALS` (or use `gcloud auth application-default login`).
+1. Set `GOOGLE_APPLICATION_CREDENTIALS` to your service account JSON path (or use `gcloud auth application-default login`).
 2. Copy `dbt/profiles.template.yml` to `dbt/profiles.yml`; set your `project` and `dataset`. Do not commit `profiles.yml`.
-3. From repo root: `.\scripts\run_bigquery_gold.ps1`
-4. Run Streamlit and set **Data source** to **BigQuery** in the sidebar.
+3. Set `DBT_BQ_PROJECT` and `DBT_BQ_DATASET` (or set them in `profiles.yml`). Marts will be written to the dataset (e.g. `pt_analytics_marts`).
+4. From repo root: `.\scripts\run_bigquery_gold.ps1`
+5. Run Streamlit and set **Data source** to **BigQuery** in the sidebar.
 
-**Docs:** [docs/bigquery_publish.md](docs/bigquery_publish.md)
+**Tables the app expects in the marts dataset:** `dim_hospital`, `dim_payer`, `dim_procedure`, `fct_standard_charges_semantic` (and `dim_source_file` if present).
+
+**Docs:** [docs/bigquery_publish.md](docs/bigquery_publish.md), [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md)
 
 ---
 
@@ -105,10 +108,34 @@ The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parqu
 
 - **Entrypoint:** Set the run command to: `streamlit run apps/streamlit_app/Home.py` (main script path).
 - **Root:** Use the repository root as the working directory so that `dbt/exports` and `apps/streamlit_app` resolve correctly.
-- **Do not ship large data.** For a hosted demo, either:
-  - **BigQuery backend:** Add secrets (e.g. `GOOGLE_APPLICATION_CREDENTIALS` or service account JSON) and set `APP_MODE=bigquery`, `BQ_PROJECT`, `BQ_DATASET` in app settings.
-  - **Local/Sample mode:** Build exports from `data/sample/` in a one-off job or CI, then run the app with `APP_MODE=local` and point `LOCAL_EXPORT_DIR` to where exports are available (e.g. mounted volume or artifact).
-- **Dependencies:** `apps/streamlit_app/requirements.txt` (streamlit, pandas, pyarrow, google-cloud-bigquery, python-dotenv). Python 3.10+.
+- **Dependencies:** `apps/streamlit_app/requirements.txt`. Python 3.10+.
+
+### BigQuery (Cloud)
+
+Credentials **must not** be committed. Use **Streamlit Secrets** in the app settings.
+
+1. In the Cloud app → **Settings** → **Secrets**, add a TOML block with:
+   - **`gcp.project_id`** — your GCP project ID
+   - **`gcp.dataset`** — the marts dataset name (e.g. `pt_analytics_marts`)
+   - **`gcp.service_account_json`** — the **full contents** of your service account JSON key file (paste as a single JSON object or multiline string)
+
+   Example shape (do not commit real values):
+
+   ```toml
+   [gcp]
+   project_id = "your-gcp-project"
+   dataset = "pt_analytics_marts"
+   service_account_json = """{"type": "service_account", "project_id": "your-gcp-project", ...}"""
+   ```
+
+2. Optionally set **APP_MODE=bigquery** in app settings so the app defaults to BigQuery; otherwise users can switch to BigQuery in the sidebar. If secrets are missing or invalid, the app shows “BigQuery not configured” and defaults to **Local (demo)**.
+
+3. Ensure the marts dataset and tables exist (run `scripts/run_bigquery_gold.ps1` locally or your CI with credentials, then deploy). See [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) for required tables and safe cleanup commands.
+
+### Local/Sample mode (no credentials)
+
+- Set **SAMPLE_DATA=1** so the app auto-generates `dbt/exports` from `data/sample/` at startup when exports are missing.
+- No secrets required; the app uses Local (demo) and reads from `dbt/exports`.
 
 ---
 
@@ -146,6 +173,7 @@ The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parqu
 | [docs/runbook.md](docs/runbook.md) | Bronze re-ingest, header sniffing, failures, env vars. |
 | [docs/repo_hygiene.md](docs/repo_hygiene.md) | Why raw_drop/lake are excluded, preflight script, full data. |
 | [docs/bigquery_publish.md](docs/bigquery_publish.md) | BigQuery publish and validation. |
+| [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) | BigQuery cleanup runbook: list/delete datasets, required tables, “do not delete marts” warnings. |
 | [docs/data_quality.md](docs/data_quality.md) | Quarantine codes, dbt tests, limitations. |
 
 ---

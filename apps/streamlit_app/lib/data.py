@@ -49,10 +49,18 @@ def _local_export_dir() -> Path:
 
 
 def _bq_project() -> str:
+    from lib import bq_auth
+    project, _dataset, _ = bq_auth.get_bq_config()
+    if project:
+        return project
     return os.environ.get("BQ_PROJECT", "pricing-transparency-portfolio").strip()
 
 
 def _bq_dataset() -> str:
+    from lib import bq_auth
+    _project, dataset, _ = bq_auth.get_bq_config()
+    if dataset:
+        return dataset
     return os.environ.get("BQ_DATASET", "pt_analytics_marts").strip()
 
 
@@ -67,8 +75,11 @@ def _bq_table(table: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _bq_client():
-    from google.cloud import bigquery
-    return bigquery.Client()
+    from lib import bq_auth
+    client, err = bq_auth.get_bq_client()
+    if err:
+        raise RuntimeError(err)
+    return client
 
 
 def _bq_query(sql: str, params: Optional[list] = None) -> pd.DataFrame:
@@ -455,14 +466,19 @@ def ensure_data_available() -> tuple[bool, str]:
         except Exception:
             pass  # proceed to missing check; bootstrap may have failed
     if mode == "bigquery":
+        from lib import bq_auth
+        client, err = bq_auth.get_bq_client()
+        if err or client is None:
+            return False, err or "BigQuery not configured."
+        project_id, dataset, _ = bq_auth.get_bq_config()
+        if not project_id or not dataset:
+            return False, "BigQuery not configured: set project_id and dataset in Streamlit secrets (gcp.project_id, gcp.dataset) or env (BQ_PROJECT, BQ_DATASET)."
         try:
-            from google.cloud import bigquery
-            client = bigquery.Client()
             sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
             client.query(sql).result()
             return True, ""
         except Exception as e:
-            return False, f"BigQuery unavailable: {e}. Set GOOGLE_APPLICATION_CREDENTIALS or use gcloud auth application-default login."
+            return False, f"BigQuery unavailable: {e}"
     export_dir = _local_export_dir()
     required = ["dim_hospital", "fct_standard_charges_semantic"]
     missing = [t for t in required if not (export_dir / f"{t}.parquet").exists() and not (export_dir / f"{t}.csv").exists()]
