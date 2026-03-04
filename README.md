@@ -19,6 +19,18 @@ Analytics pipeline and Streamlit MVP for hospital price transparency data: inges
 
 ---
 
+## Project highlights
+
+- **Bronze → Silver Parquet:** Raw CSV/JSON landed as Parquet; Silver standardizes to one row per rate with canonical columns and quarantines invalid rows (reason codes).
+- **dbt marts + tests:** Star schema (semantic fact + dims); not_null, relationships, accepted_values, and a warn-only test for UNKNOWN billing_code_type proportion.
+- **Semantic fact:** `fct_standard_charges_semantic` normalizes rate categories (negotiated, gross, cash, min, max, etc.) and filters null `billing_code` for BI-safe joins.
+- **Preflight audit:** `scripts/preflight_repo_audit.ps1` / `.sh` fails if forbidden paths (raw_drop, lake, etc.) or secrets-like files are tracked, or any file &gt; 95MB.
+- **Force re-ingest + header detection:** CSV header auto-detection (many hospital files use row 3); force re-ingest script to reprocess when the wrong header was chosen.
+
+**Next improvements:** Orchestration (e.g. Dagster) for scheduled ingest; incremental Silver/dbt; more hospitals and sources; stronger DQ rules and alerting.
+
+---
+
 ## Quickstart (Sample Data)
 
 Uses the small committed files in `data/sample/` so you can run the pipeline and Streamlit **without downloading full data or any credentials**.
@@ -77,12 +89,26 @@ For your own hospital files:
 
 ---
 
-## Deployment (Streamlit Community Cloud)
+## Run Streamlit locally
 
-- **Do not ship large data** in the repo. For a hosted demo, either:
-  - Use **BigQuery** as the backend (set credentials in Cloud secrets and `APP_MODE=bigquery`), or
-  - Use **sample mode**: build exports from `data/sample/` in CI or once, then run Streamlit in Local mode with those exports (e.g. from a small artifact or mounted volume).
-- Set the app command to: `streamlit run apps/streamlit_app/Home.py`. See [docs/runbook.md](docs/runbook.md) and `.env.example` for env vars.
+From the repo root (after generating exports via Quickstart or full run):
+
+```powershell
+streamlit run apps/streamlit_app/Home.py
+```
+
+The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parquet or CSV) and needs no credentials. Use the sidebar **Data source** to switch to **BigQuery** if you have credentials. If exports are missing, the app shows steps to generate them.
+
+---
+
+## Deploy to Streamlit Community Cloud
+
+- **Entrypoint:** Set the run command to: `streamlit run apps/streamlit_app/Home.py` (main script path).
+- **Root:** Use the repository root as the working directory so that `dbt/exports` and `apps/streamlit_app` resolve correctly.
+- **Do not ship large data.** For a hosted demo, either:
+  - **BigQuery backend:** Add secrets (e.g. `GOOGLE_APPLICATION_CREDENTIALS` or service account JSON) and set `APP_MODE=bigquery`, `BQ_PROJECT`, `BQ_DATASET` in app settings.
+  - **Local/Sample mode:** Build exports from `data/sample/` in a one-off job or CI, then run the app with `APP_MODE=local` and point `LOCAL_EXPORT_DIR` to where exports are available (e.g. mounted volume or artifact).
+- **Dependencies:** `apps/streamlit_app/requirements.txt` (streamlit, pandas, pyarrow, google-cloud-bigquery, python-dotenv). Python 3.10+.
 
 ---
 

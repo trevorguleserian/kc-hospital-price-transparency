@@ -1,5 +1,5 @@
 # Minimal CI: no secrets or credentials required.
-# Python + Streamlit app deps, data-layer import smoke test, dbt deps + parse.
+# Preflight (no large files/secrets), Streamlit data-layer import, dbt deps + parse.
 name: CI
 
 on:
@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Preflight repo audit
+        run: bash scripts/preflight_repo_audit.sh
 
       - name: Set up Python
         uses: actions/setup-python@v5
