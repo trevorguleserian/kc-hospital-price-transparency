@@ -1,11 +1,52 @@
-# Environment and secrets
+# =============================================================================
+# Secrets / credentials (never commit)
+# =============================================================================
 .env
-*.env
-!\.env.example
-secrets.toml
-*.secrets.toml
+**/.env
+!/.env.example
+!**/.env.example
+**/profiles.yml
+dbt/profiles.yml
+**/*service-account*.json
+**/*.key
+**/*.pem
+**/secrets*
+**/secrets.toml
+**/*.secrets.toml
+*credentials*.json
+*credential*.json
+*-key*.json
 
+# =============================================================================
+# Local warehouses / lakes / outputs
+# =============================================================================
+lake/
+warehouse/
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/exports/
+logs/
+
+# =============================================================================
+# Raw drops / incoming (user or runtime data; not in repo)
+# =============================================================================
+data/raw_drop/
+incoming/
+
+# =============================================================================
+# Large artifacts (Parquet, CSV, NDJSON) — allowed only under data/sample/
+# =============================================================================
+*.parquet
+*.ndjson
+*.csv
+# Allow small sample data for quickstart (must stay under data/sample/)
+!data/sample/
+!data/sample/**
+
+# =============================================================================
 # Python
+# =============================================================================
 .venv/
 venv/
 __pycache__/
@@ -15,25 +56,9 @@ __pycache__/
 dist/
 build/
 
-# Lake and warehouse (local data)
-lake/
-warehouse/
-*.duckdb
-
-# dbt
-dbt/target/
-dbt/logs/
-dbt/dbt_packages/
-dbt/profiles.yml
-dbt/exports/
-
-# Credentials (do not commit)
-*credentials*.json
-*credential*.json
-*-key*.json
-*.pem
-
+# =============================================================================
 # IDE / OS
+# =============================================================================
 .idea/
 .vscode/
 .DS_Store

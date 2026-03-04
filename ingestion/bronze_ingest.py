@@ -154,7 +154,14 @@ def _parse_json_to_dataframe(
 
 
 def _raw_drop_local(base_dir: str) -> Path:
+    """Local raw drop directory: RAW_DROP_DIR env, or data/sample if SAMPLE_DATA=1, else data/raw_drop."""
     base = Path(base_dir or ".").resolve()
+    raw_env = os.environ.get("RAW_DROP_DIR", "").strip()
+    if raw_env:
+        p = Path(raw_env)
+        return (base / p) if not p.is_absolute() else p
+    if os.environ.get("SAMPLE_DATA", "").strip() in ("1", "true", "yes"):
+        return base / "data" / "sample"
     return base / "data" / "raw_drop"
 
 

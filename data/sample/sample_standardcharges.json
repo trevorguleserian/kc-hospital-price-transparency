@@ -1,0 +1,31 @@
+{
+  "standardCharges": [
+    {
+      "code_information": [{"code": "99213", "type": "CPT"}],
+      "description": "Office visit, established patient, 15 min",
+      "standard_charges": [
+        {
+          "payers_information": [
+            {"payer_name": "Sample Payer A", "plan_name": "Commercial", "standard_charge_dollar": "150.00"},
+            {"payer_name": "Sample Payer B", "plan_name": "Medicare", "negotiated_rate": "85.50"}
+          ],
+          "gross_charge": "200.00",
+          "minimum": "75.00",
+          "maximum": "200.00"
+        }
+      ]
+    },
+    {
+      "code_information": [{"code": "99214", "type": "CPT"}],
+      "description": "Office visit, established patient, 25 min",
+      "standard_charges": [
+        {
+          "payers_information": [
+            {"payer_name": "Sample Payer A", "plan_name": "Commercial", "standard_charge_dollar": "225.00"}
+          ],
+          "gross_charge": "280.00"
+        }
+      ]
+    }
+  ]
+}

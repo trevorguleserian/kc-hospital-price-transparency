@@ -1,0 +1,6 @@
+Hospital Standard Charges - Sample
+This file has 2 preamble rows; data header is on row 3
+billing_code,description,gross_charge,discounted_cash_price,negotiated_rate,payer_name,plan_name
+99213,Office visit established 15 min,200.00,180.00,150.00,Sample Payer A,Commercial
+99213,Office visit established 15 min,200.00,,85.50,Sample Payer B,Medicare
+99214,Office visit established 25 min,280.00,250.00,225.00,Sample Payer A,Commercial
