@@ -446,8 +446,14 @@ def get_outlier_rates(limit: int = 100) -> pd.DataFrame:
 
 
 def ensure_data_available() -> tuple[bool, str]:
-    """Check data availability. Returns (ok, message)."""
+    """Check data availability. Returns (ok, message). When local + SAMPLE_DATA=1, auto-bootstrap if exports missing."""
     mode = get_mode()
+    if mode == "local":
+        try:
+            from lib import bootstrap
+            bootstrap.ensure_demo_exports_exist(st)
+        except Exception:
+            pass  # proceed to missing check; bootstrap may have failed
     if mode == "bigquery":
         try:
             from google.cloud import bigquery

@@ -3,3 +3,6 @@ pandas
 pyarrow
 google-cloud-bigquery
 python-dotenv
+dbt-core
+dbt-duckdb
+duckdb
