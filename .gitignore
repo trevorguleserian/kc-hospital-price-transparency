@@ -1,0 +1,40 @@
+# Environment and secrets
+.env
+*.env
+!\.env.example
+secrets.toml
+*.secrets.toml
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Lake and warehouse (local data)
+lake/
+warehouse/
+*.duckdb
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/profiles.yml
+dbt/exports/
+
+# Credentials (do not commit)
+*credentials*.json
+*credential*.json
+*-key*.json
+*.pem
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

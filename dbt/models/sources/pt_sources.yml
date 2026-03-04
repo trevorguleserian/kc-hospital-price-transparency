@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: pt_analytics
+    schema: pt_analytics
+    description: "BigQuery dataset pt_analytics: raw landing and registry tables for hospital price transparency."
+    tables:
+      - name: pt_json_extracted_rates
+        description: "NDJSON-extracted rate records from PT JSON MRF files; one row per payer-rate."
+      - name: pt_csv_raw_tall
+        description: "CSV tall format ingested as NDJSON rows; raw JSON per CSV data row."
+      - name: pt_csv_raw_wide
+        description: "CSV wide format ingested as NDJSON rows; raw JSON per CSV data row."
+      - name: pt_json_registry
+        description: "Registry of JSON MRF file ingest runs (paths, status, row counts)."
+      - name: pt_csv_registry
+        description: "File-level registry for CSV PT files (preamble, delimiter, status)."

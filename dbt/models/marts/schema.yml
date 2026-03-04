@@ -1,0 +1,143 @@
+version: 2
+
+models:
+  - name: dim_hospital
+    description: "One row per source_file_name in the union; full coverage so fact joins always match. Names from registries or derived from filename; use hospital_name_clean in dashboards."
+    columns:
+      - name: hospital_id
+        description: "Stable surrogate key from hospital_name_norm; never null. May repeat across rows (same norm, different source_file_name)."
+        tests:
+          - not_null
+      - name: hospital_name
+        description: "Raw-ish name from registry preamble or derived from source_file_name."
+      - name: hospital_name_clean
+        description: "Human-readable name for dashboards: underscores/hyphens to spaces, collapsed spaces, trim."
+        tests:
+          - not_null
+      - name: hospital_name_norm
+        description: "Normalized for matching/dedup: lower, punctuation removed, collapsed spaces."
+        tests:
+          - not_null
+      - name: source_system
+        description: "Origin: csv_tall, csv_wide, or json (optional)."
+      - name: source_file_name
+        description: "One representative file for lineage (optional)."
+    tests: []
+
+  - name: dim_payer
+    description: "Distinct payer_name and plan_name from union."
+    columns:
+      - name: payer_name
+        description: "Payer name."
+      - name: plan_name
+        description: "Plan name."
+    tests: []
+
+  - name: dim_procedure
+    description: "Distinct billing_code, billing_code_type, description from union. billing_code_type inferred from code when source is UNKNOWN."
+    columns:
+      - name: billing_code
+        description: "CPT/HCPCS/DRG or other code."
+      - name: billing_code_type
+        description: "Code type or system (CPT, HCPCS, NDC, REVENUE, ICD-10-PCS, or UNKNOWN)."
+        tests:
+          - accepted_values:
+              values: ['CPT', 'HCPCS', 'NDC', 'REVENUE', 'ICD-10-PCS', 'UNKNOWN']
+      - name: description
+        description: "Procedure or service description."
+    tests: []
+
+  - name: fct_standard_charges
+    description: "Fact table of standard charges; partitioned by ingested_at, clustered by hospital_id, billing_code, payer_name."
+    columns:
+      - name: standard_charge_sk
+        description: "Surrogate key for the rate record."
+        tests:
+          - not_null
+          - unique
+      - name: hospital_id
+        description: "Hospital identifier from dim_hospital (join on source_file_name); fallback surrogate if no match."
+        tests:
+          - not_null
+      - name: source_system
+        description: "Origin: json, csv_tall, or csv_wide."
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['json', 'csv_tall', 'csv_wide']
+      - name: rate_amount
+        description: "Primary rate amount (numeric)."
+      - name: ingested_at
+        description: "When the record was ingested (partition key)."
+    tests: []
+
+  - name: fct_standard_charges_semantic
+    description: "Semantic fact: one row per (standard_charge_sk, rate_category); normalized rate_amount + rate_category for BI."
+    columns:
+      - name: semantic_charge_sk
+        description: "Surrogate key for the semantic row (standard_charge_sk + rate_category)."
+        tests:
+          - not_null
+          - unique
+      - name: standard_charge_sk
+        description: "Reference to base charge record."
+        tests:
+          - not_null
+      - name: hospital_id
+        description: "Hospital identifier; join to dim_hospital."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_hospital')
+              field: hospital_id
+      - name: billing_code
+        description: "Procedure/service code; join to dim_procedure."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_procedure')
+              field: billing_code
+      - name: rate_category
+        description: "Canonical category: negotiated, gross, cash, min, max, percentage, other."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['negotiated', 'gross', 'cash', 'min', 'max', 'percentage', 'other']
+      - name: ingested_at
+        description: "When the record was ingested."
+        tests:
+          - not_null
+      - name: source_system
+        description: "Origin: json, csv_tall, or csv_wide."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['json', 'csv_tall', 'csv_wide']
+    tests: []
+
+  - name: dim_source_file
+    description: "One row per (source_file_name, source_system); registry metadata for lineage."
+    columns:
+      - name: source_file_name
+        description: "Original file name as ingested."
+      - name: source_system
+        description: "json, csv_tall, or csv_wide."
+      - name: hospital_name
+        description: "Derived from registry preamble or file name."
+      - name: ingested_at_min
+        description: "Earliest ingested_at for this file."
+      - name: ingested_at_max
+        description: "Latest ingested_at for this file."
+      - name: rows_loaded
+        description: "Row count from registry."
+      - name: status
+        description: "Registry status (success/failed)."
+      - name: delimiter
+        description: "CSV delimiter when applicable."
+      - name: encoding
+        description: "File encoding when applicable."
+      - name: header_count
+        description: "CSV header column count when applicable."
+    tests: []

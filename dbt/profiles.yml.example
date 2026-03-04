@@ -1,0 +1,45 @@
+# Copy to profiles.yml (or set DBT_PROFILES_DIR). Do not commit credentials.
+# BigQuery auth: gcloud ADC (method: oauth) or GOOGLE_APPLICATION_CREDENTIALS (method: service-account).
+# Optional: DBT_BQ_PROJECT, DBT_BQ_DATASET. See docs/dbt_profiles_template.yml for full template.
+
+kc_hospital_price_transparency:
+  target: dev
+
+  outputs:
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+      dataset: "{{ env_var('DBT_BQ_DATASET', 'pt_analytics') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    dev:
+      type: bigquery
+      method: service-account
+      project: "pricing-transparency-portfolio"
+      dataset: "pt_analytics"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    dev_bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+      dataset: "{{ env_var('DBT_BQ_DATASET', 'pt_analytics') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    local_duckdb:
+      type: duckdb
+      path: "../warehouse/duckdb/gold.duckdb"
+      threads: 4

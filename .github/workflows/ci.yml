@@ -1,0 +1,45 @@
+# Minimal CI: no secrets or credentials required.
+# Python + Streamlit app deps, data-layer import smoke test, dbt deps + parse.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Streamlit app dependencies
+        run: pip install -r apps/streamlit_app/requirements.txt
+
+      - name: Import smoke test (Streamlit data layer)
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          python -c "import apps.streamlit_app.lib.data as data; print('data layer OK')"
+
+      - name: Install dbt
+        run: pip install dbt-core dbt-bigquery
+      - name: dbt deps and parse
+        run: |
+          mkdir -p "$HOME/.dbt"
+          printf '%s\n' \
+            'kc_hospital_price_transparency:' \
+            '  target: dev' \
+            '  outputs:' \
+            '    dev:' \
+            '      type: bigquery' \
+            '      project: ci-placeholder' \
+            '      dataset: placeholder' \
+            '      method: oauth' \
+            > "$HOME/.dbt/profiles.yml"
+          cd dbt && dbt deps && dbt parse

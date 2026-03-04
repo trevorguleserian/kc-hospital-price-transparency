@@ -1,0 +1,38 @@
+name: kc_hospital_price_transparency
+version: 1.0.0
+config-version: 2
+
+profile: kc_hospital_price_transparency
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Execution mode: bq (BigQuery, default) | local (DuckDB + lake Silver)
+# silver_parquet_glob: absolute path glob for Silver Parquet (local mode). Example: C:/repo/lake/silver/standard_charges/**/*.parquet
+vars:
+  execution_mode: "bq"
+  silver_parquet_glob: "lake/silver/standard_charges/**/*.parquet"
+
+models:
+  kc_hospital_price_transparency:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: view
+      +schema: staging
+    staging.local:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts

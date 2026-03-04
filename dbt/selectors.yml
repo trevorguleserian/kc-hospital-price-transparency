@@ -1,0 +1,35 @@
+selectors:
+  - name: local
+    description: Models only for local BI (staging/local + intermediate + marts). No tests.
+    definition:
+      intersection:
+        - method: resource_type
+          value: model
+        - union:
+            - method: path
+              value: models/staging/local
+            - method: path
+              value: models/intermediate
+            - method: path
+              value: models/marts
+
+  - name: local_models
+    description: Alias for local (same as local).
+    definition:
+      intersection:
+        - method: resource_type
+          value: model
+        - union:
+            - method: path
+              value: models/staging/local
+            - method: path
+              value: models/intermediate
+            - method: path
+              value: models/marts
+
+  - name: marts_plus
+    description: Marts and all upstream dependencies (for BigQuery gold publish).
+    definition:
+      method: path
+      value: models/marts
+      parents: true

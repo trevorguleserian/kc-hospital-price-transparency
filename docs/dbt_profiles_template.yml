@@ -1,0 +1,61 @@
+# Profile template for kc_hospital_price_transparency. Do not commit real credentials.
+# Copy to dbt/profiles.yml (e.g. copy dbt/profiles.template.yml dbt/profiles.yml) or set DBT_PROFILES_DIR.
+#
+# BigQuery auth: use one of:
+#   A) gcloud ADC: run "gcloud auth application-default login", then use method: oauth and omit keyfile.
+#   B) Service account JSON: set GOOGLE_APPLICATION_CREDENTIALS to the key file path, use method: service-account and keyfile below.
+#
+# Optional environment variables:
+#   DBT_BQ_PROJECT - BigQuery project ID
+#   DBT_BQ_DATASET - Base dataset (e.g. pt_analytics); marts materialize in <dataset>_marts.
+
+kc_hospital_price_transparency:
+  target: bigquery
+
+  outputs:
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+      dataset: "{{ env_var('DBT_BQ_DATASET', 'pt_analytics') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    # Alternative: gcloud ADC (run: gcloud auth application-default login)
+    # bigquery:
+    #   type: bigquery
+    #   method: oauth
+    #   project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+    #   dataset: "{{ env_var('DBT_BQ_DATASET', 'pt_analytics') }}"
+    #   location: "US"
+    #   threads: 4
+
+    dev_bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+      dataset: "{{ env_var('DBT_BQ_DATASET', 'pt_analytics') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    dev:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('DBT_BQ_PROJECT', 'your-gcp-project-id') }}"
+      dataset: "pt_analytics"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
+      location: "US"
+      threads: 4
+      timeout_seconds: 300
+      priority: interactive
+
+    local_duckdb:
+      type: duckdb
+      path: "../warehouse/duckdb/gold.duckdb"
+      threads: 4

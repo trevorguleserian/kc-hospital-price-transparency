@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: "pt_analytics"
+    description: "Raw hospital price transparency landing tables (external or loaded) for JSON and CSV formats."
+    tables:
+      - name: pt_json_raw
+        description: "Raw JSON-format price transparency files as ingested into BigQuery."
+      - name: pt_csv_raw
+        description: "Raw CSV-format price transparency files (tall and wide) as ingested into BigQuery."
+

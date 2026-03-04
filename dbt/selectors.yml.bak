@@ -1,0 +1,18 @@
+selectors:
+  # Local models only (no tests). Use: dbt build --selector local
+  - name: local
+    definition:
+      intersection:
+        - method: tag
+          value: local
+        - method: resource_type
+          value: model
+
+  # Local tests only (tests that depend on local models). Use: dbt test --selector local_tests
+  - name: local_tests
+    definition:
+      intersection:
+        - method: children_of
+          value: tag:local
+        - method: resource_type
+          value: test

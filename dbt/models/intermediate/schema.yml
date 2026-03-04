@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: int_pt_standard_charges_union
+    description: "Union of all three staging models with surrogate key standard_charge_sk; one row per rate record."
+    columns:
+      - name: standard_charge_sk
+        description: "Hash of source_file_name, billing_code, payer_name, plan_name, rate_type, ingested_at."
+      - name: source_system
+        description: "Origin system: json, csv_tall, or csv_wide."
+      - name: source_file_name
+        description: "Original ingested file name."
+      - name: ingested_at
+        description: "When the record was loaded."
+    tests:
+      - unique:
+          arguments:
+            column_name: standard_charge_sk

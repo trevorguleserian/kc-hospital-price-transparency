@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: lakehouse
+    description: "Local lakehouse Silver layer (Parquet); used when execution_mode=local."
+    schema: main
+    tables:
+      - name: silver_standard_charges
+        description: "View over lake/silver/standard_charges Parquet (created by model silver_standard_charges)."

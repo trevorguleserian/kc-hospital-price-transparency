@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: stg_pt_json_rates
+    description: "Staging view for JSON-extracted rate records; canonical columns, source_system = json."
+    columns:
+      - name: source_system
+        description: "Origin: json, csv_tall, or csv_wide."
+      - name: source_file_name
+        description: "Original file name as ingested."
+      - name: rate_amount
+        description: "Primary numeric rate (negotiated_rate for JSON)."
+    tests: []
+
+  - name: stg_pt_csv_tall
+    description: "Staging view for CSV tall format; parses raw JSON into canonical columns."
+    columns:
+      - name: source_system
+        description: "Always csv_tall."
+    tests: []
+
+  - name: stg_pt_csv_wide
+    description: "Staging view for CSV wide; unpivots known rate columns into tall rows (best-effort)."
+    columns:
+      - name: source_system
+        description: "Always csv_wide."
+    tests: []

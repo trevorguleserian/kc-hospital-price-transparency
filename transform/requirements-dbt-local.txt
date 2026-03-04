@@ -1,0 +1,3 @@
+dbt-duckdb
+dbt-core
+dbt-utils

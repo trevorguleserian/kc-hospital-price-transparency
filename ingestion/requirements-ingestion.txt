@@ -1,0 +1,7 @@
+google-cloud-bigquery
+google-cloud-storage
+ijson
+chardet
+pandas
+pyarrow
+duckdb
