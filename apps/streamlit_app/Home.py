@@ -7,6 +7,7 @@ import streamlit as st
 
 from lib import data, ui
 from lib import debug
+from lib import bq_auth
 
 st.set_page_config(page_title="Price Transparency — Overview", page_icon="🏥", layout="wide")
 
@@ -15,14 +16,28 @@ debug.require_bq_secrets_or_stop()
 
 ui.render_sidebar()
 
-# Debug (safe): keys only, no secret values
+# Debug (safe): keys and types only, no secret values
 with st.sidebar:
     with st.expander("Debug (safe)", expanded=False):
+        info = debug.safe_runtime_info()
+        bq_ver = info.get("google_cloud_bigquery_version")
+        runtime_line = f"Python {info.get('python_version', '')} | {info.get('platform', '')}"
+        if bq_ver:
+            runtime_line += f" | google-cloud-bigquery {bq_ver}"
+        st.caption(runtime_line)
         st.text("Secret keys present: " + ", ".join(debug.secrets_keys()) if debug.secrets_keys() else "(none)")
+        st.text("gcp_service_account type: " + debug.get_gcp_sa_type())
+        sa_keys = debug.get_gcp_sa_key_names()
+        if sa_keys:
+            st.text("gcp_service_account keys (names only): " + ", ".join(sa_keys))
         ok_bq, missing = debug.has_bq_secrets()
         if not ok_bq:
-            st.text("Missing keys: " + ", ".join(missing))
-        st.json(debug.safe_runtime_info())
+            st.text("Missing items: " + ", ".join(missing))
+        st.json(info)
+        try:
+            st.json(bq_auth.get_bq_config_summary())
+        except Exception:
+            pass
 
 ok, msg = data.ensure_data_available()
 if not ok:

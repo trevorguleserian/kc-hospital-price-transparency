@@ -134,26 +134,41 @@ def get_bq_client() -> Tuple[Optional[object], Optional[str]]:
 
 
 def validate_bigquery_secrets() -> Tuple[bool, str]:
-    """When BigQuery is selected, return (ok, message). If not ok, message lists required keys."""
-    project = (_secret("BQ_PROJECT") or os.environ.get("BQ_PROJECT") or DEFAULT_BQ_PROJECT).strip()
-    dataset = (_secret("BQ_DATASET_MARTS") or os.environ.get("BQ_DATASET_MARTS") or os.environ.get("BQ_DATASET") or DEFAULT_BQ_DATASET_MARTS).strip()
-    has_creds = _get_service_account_from_secrets() is not None or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    """When BigQuery is selected, return (ok, message). If not ok, message lists missing subkeys (e.g. gcp_service_account.private_key)."""
+    from . import debug
+    ok, missing_items = debug.has_bq_secrets()
+    if ok:
+        return True, ""
+    msg = debug.bq_secrets_error_message()
+    return False, msg
 
-    missing = []
-    if not has_creds:
-        missing.append("**gcp_service_account** — service account as a dict (required on Streamlit Cloud; or set GOOGLE_APPLICATION_CREDENTIALS locally)")
-    if not project:
-        missing.append("**BQ_PROJECT** (or env)")
-    if not dataset:
-        missing.append("**BQ_DATASET_MARTS** (or env; default pt_analytics_marts)")
 
-    if missing:
-        return False, (
-            "BigQuery is selected but secrets are missing or incomplete.\n\n"
-            "**Required:**\n- " + "\n- ".join(missing) + "\n\n"
-            "See README **Streamlit Cloud → BigQuery setup** for the exact Secrets TOML and IAM roles."
-        )
-    return True, ""
+def get_bq_config_summary() -> dict:
+    """
+    Safe config summary: project_id, dataset, location, creds_source, sa_type, has_private_key (bool).
+    No secret values; has_private_key is True only if the key exists and is non-empty (value not inspected).
+    """
+    project_id, dataset_marts, location, creds_source = get_bq_config()
+    sa = _get_service_account_from_secrets()
+    sa_type: str = "missing"
+    has_private_key_bool = False
+    if sa is None:
+        try:
+            from . import debug
+            sa_type = debug.get_gcp_sa_type()
+        except Exception:
+            pass
+    else:
+        sa_type = type(sa).__name__
+        has_private_key_bool = "private_key" in sa and bool(sa.get("private_key"))
+    return {
+        "project_id": project_id or "",
+        "dataset": dataset_marts or "",
+        "location": location or "",
+        "creds_source": creds_source,
+        "sa_type": sa_type,
+        "has_private_key": has_private_key_bool,
+    }
 
 
 def is_bigquery_configured() -> bool:

@@ -18,6 +18,39 @@ GCP_SA_REQUIRED_FIELDS = ("type", "project_id", "private_key_id", "private_key",
 BQ_REQUIRED_KEYS = ["BQ_PROJECT", "BQ_LOCATION", "BQ_DATASET_MARTS", "gcp_service_account"]
 
 
+def _is_empty_value(v) -> bool:
+    """True if value is considered missing/empty (no secret value inspected)."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return not v.strip()
+    return False
+
+
+def _get_gcp_sa_raw():
+    """Get gcp_service_account value from secrets; no values logged."""
+    try:
+        return st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
+    except Exception:
+        return None
+
+
+def get_gcp_sa_type() -> str:
+    """Return type of gcp_service_account value for display (e.g. 'dict', 'str'). No secret values."""
+    raw = _get_gcp_sa_raw()
+    if raw is None:
+        return "missing"
+    return type(raw).__name__
+
+
+def get_gcp_sa_key_names() -> list[str]:
+    """Return list of key names inside gcp_service_account if it is a dict; else []. No values."""
+    raw = _get_gcp_sa_raw()
+    if not isinstance(raw, dict):
+        return []
+    return sorted(raw.keys())
+
+
 def secrets_keys() -> list[str]:
     """Return sorted list of st.secrets top-level key names (no values)."""
     return sorted(_safe_secrets_keys())
@@ -26,8 +59,8 @@ def secrets_keys() -> list[str]:
 def has_bq_secrets() -> tuple[bool, list[str]]:
     """
     Check presence of required BigQuery secrets (key names only).
-    required = BQ_PROJECT, BQ_LOCATION, BQ_DATASET_MARTS, gcp_service_account (dict with SA fields).
-    Returns (True, []) if all present, else (False, missing_keys).
+    Returns (True, []) if all present and valid, else (False, missing_items).
+    missing_items: top-level keys, or "gcp_service_account (not a table/dict; got <type>)", or "gcp_service_account.<field>" for missing/empty subfields.
     """
     keys = _safe_secrets_keys()
     missing: list[str] = []
@@ -41,13 +74,17 @@ def has_bq_secrets() -> tuple[bool, list[str]]:
         missing.append("gcp_service_account")
     else:
         try:
-            raw = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
-            if not isinstance(raw, dict):
+            raw = _get_gcp_sa_raw()
+            if raw is None:
                 missing.append("gcp_service_account")
+            elif not isinstance(raw, dict):
+                missing.append(f"gcp_service_account (not a table/dict; got {type(raw).__name__})")
             else:
-                sa_missing = [f for f in GCP_SA_REQUIRED_FIELDS if f not in raw]
-                if sa_missing:
-                    missing.append("gcp_service_account")
+                for f in GCP_SA_REQUIRED_FIELDS:
+                    if f not in raw:
+                        missing.append(f"gcp_service_account.{f}")
+                    elif _is_empty_value(raw[f]):
+                        missing.append(f"gcp_service_account.{f}")
         except Exception:
             missing.append("gcp_service_account")
 
@@ -55,13 +92,18 @@ def has_bq_secrets() -> tuple[bool, list[str]]:
 
 
 def safe_runtime_info() -> dict:
-    """Return runtime info safe to display (no secrets): python version, platform, cwd, Streamlit Cloud flag."""
+    """Return runtime info safe to display (no secrets): python version, platform, cwd, Streamlit Cloud flag, optional package versions."""
     info = {
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
         "cwd": os.getcwd(),
         "streamlit_cloud": os.environ.get("STREAMLIT_SERVER_HEADLESS", "").strip().lower() in ("true", "1"),
     }
+    try:
+        import google.cloud.bigquery as _bq
+        info["google_cloud_bigquery_version"] = getattr(_bq, "__version__", "unknown")
+    except Exception:
+        info["google_cloud_bigquery_version"] = None
     return info
 
 
@@ -146,40 +188,38 @@ def bq_smoke_test() -> Tuple[bool, str]:
 
 def bq_secrets_error_message() -> str:
     """
-    Build full "BigQuery not configured" message (keys only): present keys, missing keys, expected TOML.
-    Call when has_bq_secrets() is False.
+    Build full "BigQuery not configured" message (keys and types only, no secret values).
+    Shows: present top-level keys, missing items (including subkeys), gcp_service_account value type.
     """
     ok, missing = has_bq_secrets()
     present = secrets_keys()
+    sa_type = get_gcp_sa_type()
     lines = [
         "BigQuery selected but secrets are missing or incomplete.",
         "",
         "Present secrets keys: " + (", ".join(present) if present else "(none)"),
-        "Missing keys: " + ", ".join(missing),
+        "Missing items: " + ", ".join(missing),
         "",
-        "Expected TOML structure:",
-        "  [gcp_service_account]",
-        "  type = \"service_account\"",
-        "  project_id = \"your-project\"",
-        "  private_key_id = \"...\"",
-        "  private_key = \"-----BEGIN PRIVATE KEY-----\\n...\"",
-        "  client_email = \"...@....iam.gserviceaccount.com\"",
-        "  BQ_PROJECT = \"your-bq-project\"",
-        "  BQ_LOCATION = \"US\"",
-        "  BQ_DATASET_MARTS = \"pt_analytics_marts\"",
+        "gcp_service_account value type: " + sa_type,
     ]
+    if sa_type == "dict":
+        sa_keys = get_gcp_sa_key_names()
+        lines.append("gcp_service_account keys (names only): " + ", ".join(sa_keys))
     return "\n".join(lines)
 
 
 def require_bq_secrets_or_stop() -> None:
-    """If BigQuery required secrets are missing, show error (keys only) and st.stop()."""
+    """If BigQuery required secrets are missing, show error (keys/types only, no values) and st.stop()."""
     ok, missing = has_bq_secrets()
     if ok:
         return
     st.error("BigQuery not configured")
     st.markdown("**Secrets are missing or incomplete.**")
     st.text("Present secrets keys: " + (", ".join(secrets_keys()) if secrets_keys() else "(none)"))
-    st.text("Missing keys: " + ", ".join(missing))
+    st.text("Missing items: " + ", ".join(missing))
+    st.text("gcp_service_account value type: " + get_gcp_sa_type())
+    if get_gcp_sa_type() == "dict":
+        st.text("gcp_service_account keys (names only): " + ", ".join(get_gcp_sa_key_names()))
     with st.expander("Expected TOML structure (keys only)"):
         st.code(
             "BQ_PROJECT = \"your-project\"\n"
