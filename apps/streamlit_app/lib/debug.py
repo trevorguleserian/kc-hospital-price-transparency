@@ -6,12 +6,63 @@ Shows: secret keys present, gcp_service_account presence, required field names o
 from __future__ import annotations
 
 import os
+import sys
 from typing import Tuple
 
 import streamlit as st
 
 # Service account dict keys we check for presence (names only; never log values).
 GCP_SA_REQUIRED_FIELDS = ("type", "project_id", "private_key_id", "private_key", "client_email")
+
+# Required top-level keys for BigQuery (Cloud). BQ_LOCATION can default to US in bq_auth but we report if missing.
+BQ_REQUIRED_KEYS = ["BQ_PROJECT", "BQ_LOCATION", "BQ_DATASET_MARTS", "gcp_service_account"]
+
+
+def secrets_keys() -> list[str]:
+    """Return sorted list of st.secrets top-level key names (no values)."""
+    return sorted(_safe_secrets_keys())
+
+
+def has_bq_secrets() -> tuple[bool, list[str]]:
+    """
+    Check presence of required BigQuery secrets (key names only).
+    required = BQ_PROJECT, BQ_LOCATION, BQ_DATASET_MARTS, gcp_service_account (dict with SA fields).
+    Returns (True, []) if all present, else (False, missing_keys).
+    """
+    keys = _safe_secrets_keys()
+    missing: list[str] = []
+
+    for k in ("BQ_PROJECT", "BQ_LOCATION", "BQ_DATASET_MARTS"):
+        if k not in keys and not os.environ.get(k):
+            missing.append(k)
+
+    has_gcp_sa_key = "gcp_service_account" in keys
+    if not has_gcp_sa_key:
+        missing.append("gcp_service_account")
+    else:
+        try:
+            raw = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
+            if not isinstance(raw, dict):
+                missing.append("gcp_service_account")
+            else:
+                sa_missing = [f for f in GCP_SA_REQUIRED_FIELDS if f not in raw]
+                if sa_missing:
+                    missing.append("gcp_service_account")
+        except Exception:
+            missing.append("gcp_service_account")
+
+    return (len(missing) == 0, missing)
+
+
+def safe_runtime_info() -> dict:
+    """Return runtime info safe to display (no secrets): python version, platform, cwd, Streamlit Cloud flag."""
+    info = {
+        "python_version": sys.version.split()[0],
+        "platform": sys.platform,
+        "cwd": os.getcwd(),
+        "streamlit_cloud": os.environ.get("STREAMLIT_SERVER_HEADLESS", "").strip().lower() in ("true", "1"),
+    }
+    return info
 
 
 def is_debug_enabled() -> bool:
@@ -91,6 +142,58 @@ def bq_smoke_test() -> Tuple[bool, str]:
         return True, "SELECT 1 succeeded"
     except Exception as e:
         return False, f"Smoke test error: {type(e).__name__}: {str(e)[:200]}"
+
+
+def bq_secrets_error_message() -> str:
+    """
+    Build full "BigQuery not configured" message (keys only): present keys, missing keys, expected TOML.
+    Call when has_bq_secrets() is False.
+    """
+    ok, missing = has_bq_secrets()
+    present = secrets_keys()
+    lines = [
+        "BigQuery selected but secrets are missing or incomplete.",
+        "",
+        "Present secrets keys: " + (", ".join(present) if present else "(none)"),
+        "Missing keys: " + ", ".join(missing),
+        "",
+        "Expected TOML structure:",
+        "  [gcp_service_account]",
+        "  type = \"service_account\"",
+        "  project_id = \"your-project\"",
+        "  private_key_id = \"...\"",
+        "  private_key = \"-----BEGIN PRIVATE KEY-----\\n...\"",
+        "  client_email = \"...@....iam.gserviceaccount.com\"",
+        "  BQ_PROJECT = \"your-bq-project\"",
+        "  BQ_LOCATION = \"US\"",
+        "  BQ_DATASET_MARTS = \"pt_analytics_marts\"",
+    ]
+    return "\n".join(lines)
+
+
+def require_bq_secrets_or_stop() -> None:
+    """If BigQuery required secrets are missing, show error (keys only) and st.stop()."""
+    ok, missing = has_bq_secrets()
+    if ok:
+        return
+    st.error("BigQuery not configured")
+    st.markdown("**Secrets are missing or incomplete.**")
+    st.text("Present secrets keys: " + (", ".join(secrets_keys()) if secrets_keys() else "(none)"))
+    st.text("Missing keys: " + ", ".join(missing))
+    with st.expander("Expected TOML structure (keys only)"):
+        st.code(
+            "BQ_PROJECT = \"your-project\"\n"
+            "BQ_LOCATION = \"US\"\n"
+            "BQ_DATASET_MARTS = \"pt_analytics_marts\"\n\n"
+            "[gcp_service_account]\n"
+            "type = \"service_account\"\n"
+            "project_id = \"...\"\n"
+            "private_key_id = \"...\"\n"
+            "private_key = \"...\"\n"
+            "client_email = \"...\"",
+            language="toml",
+        )
+    st.stop()
 
 
 def render_debug_panel() -> None:

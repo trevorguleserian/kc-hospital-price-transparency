@@ -27,64 +27,20 @@ def _cached_fct_semantic_count(project_id: str, dataset: str) -> tuple[bool, str
         return False, str(e).strip() or "Query failed", None
 
 
-def _bigquery_instructions():
-    return """
-**Streamlit Cloud:** Use Secrets with keys from README **Streamlit Cloud → BigQuery setup**: `gcp_service_account`, `BQ_PROJECT`, `BQ_DATASET_MARTS`, `BQ_LOCATION` (optional).
-
-**Local:** Set `GOOGLE_APPLICATION_CREDENTIALS` and env `BQ_PROJECT`, `BQ_DATASET_MARTS` (default `pt_analytics_marts`).
-"""
-
-
 def render_sidebar():
-    """Sidebar: data source (Local / BigQuery), active path, data availability, demo controls."""
+    """Sidebar: BigQuery only (Cloud). Active source label, data availability, demo controls."""
     with st.sidebar:
-        # Init data source from env or default local (demo mode, no creds)
-        if "app_data_source" not in st.session_state:
-            st.session_state["app_data_source"] = (os.environ.get("APP_MODE") or "local").strip().lower()
-
         st.subheader("Data source")
-        choice = st.radio(
-            "Source",
-            ["Local (demo)", "BigQuery"],
-            index=1 if data.get_mode() == "bigquery" else 0,
-            help="Local uses dbt/exports. BigQuery uses Streamlit secrets (Cloud) or GOOGLE_APPLICATION_CREDENTIALS + BQ_PROJECT/BQ_DATASET (local).",
-            key="data_source_radio",
-        )
-        new_mode = "bigquery" if choice == "BigQuery" else "local"
-        if st.session_state.get("app_data_source") != new_mode:
-            st.session_state["app_data_source"] = new_mode
-            st.rerun()
-
-        # If BigQuery selected, validate secrets on startup; show exact required keys if missing
-        if new_mode == "bigquery":
-            ok_val, validation_msg = bq_auth.validate_bigquery_secrets()
-            if not ok_val:
-                st.error("BigQuery not configured. Using Local (demo).")
-                with st.expander("Required secrets (click to see exact keys)", expanded=True):
-                    st.markdown(validation_msg)
-                st.session_state["app_data_source"] = "local"
-                st.rerun()
-            else:
-                client, err = bq_auth.get_bq_client()
-                if err or client is None:
-                    st.error(err or "BigQuery client failed. Using Local (demo).")
-                    with st.expander("Required secrets (exact keys)", expanded=True):
-                        st.code("\n".join(bq_auth.REQUIRED_SECRETS_KEYS), language="text")
-                    st.session_state["app_data_source"] = "local"
-                    st.rerun()
-
+        st.caption("BigQuery only (Cloud)")
         st.caption(data.get_active_source_label())
         ok, msg = data.ensure_data_available()
         if not ok:
             st.error(msg)
-            if data.get_mode() == "local":
-                with st.expander("How to generate local exports"):
-                    st.markdown(data.get_local_exports_instructions())
         else:
             st.success("Data available")
 
         # BigQuery diagnostic panel (resolved config + cached COUNT(1) on fct_standard_charges_semantic)
-        if data.get_mode() == "bigquery":
+        if ok:
             project_id, dataset, location, creds_source = bq_auth.get_bq_config()
             with st.expander("BigQuery status"):
                 st.text(f"Project: {project_id}")

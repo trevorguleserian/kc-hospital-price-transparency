@@ -1,6 +1,7 @@
 """
 MVP Home: overview dashboard (metrics, rate_category distribution, ingested_at range).
 Run from repo root: streamlit run apps/streamlit_app/Home.py
+BigQuery-only for Cloud runs.
 """
 import streamlit as st
 
@@ -8,19 +9,31 @@ from lib import data, ui
 from lib import debug
 
 st.set_page_config(page_title="Price Transparency — Overview", page_icon="🏥", layout="wide")
+
+# Guard: stop early if BigQuery secrets missing (no local path attempt)
+debug.require_bq_secrets_or_stop()
+
 ui.render_sidebar()
+
+# Debug (safe): keys only, no secret values
+with st.sidebar:
+    with st.expander("Debug (safe)", expanded=False):
+        st.text("Secret keys present: " + ", ".join(debug.secrets_keys()) if debug.secrets_keys() else "(none)")
+        ok_bq, missing = debug.has_bq_secrets()
+        if not ok_bq:
+            st.text("Missing keys: " + ", ".join(missing))
+        st.json(debug.safe_runtime_info())
+
+ok, msg = data.ensure_data_available()
+if not ok:
+    st.error(msg)
+    st.stop()
+
 if debug.is_debug_enabled():
     debug.render_debug_panel()
 
 st.title("Hospital Price Transparency")
 st.caption("Overview")
-
-ok, msg = data.ensure_data_available()
-if not ok:
-    st.error(msg)
-    if data.get_mode() == "local":
-        st.markdown(data.get_local_exports_instructions())
-    st.stop()
 
 metrics = data.get_overview_metrics(data.get_mode())
 cols = st.columns(4)

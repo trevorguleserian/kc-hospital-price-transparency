@@ -1,20 +1,21 @@
 """
 Data Quality: null-rate checks, UNKNOWN billing_code_type counts, top outlier rates.
+BigQuery-only for Cloud runs.
 """
 import io
 import json
 import streamlit as st
 
 from lib import data, ui
+from lib import debug
 
 st.set_page_config(page_title="Data Quality", page_icon="📋", layout="wide")
+debug.require_bq_secrets_or_stop()
 ui.render_sidebar()
 
 ok, msg = data.ensure_data_available()
 if not ok:
     st.error(msg)
-    if data.get_mode() == "local":
-        st.markdown(data.get_local_exports_instructions())
     st.stop()
 
 st.title("Data Quality")

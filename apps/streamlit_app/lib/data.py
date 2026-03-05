@@ -1,6 +1,6 @@
 """
 Data access layer for Streamlit app.
-Supports APP_MODE=bigquery (BigQuery) or APP_MODE=local (Parquet from LOCAL_EXPORT_DIR).
+BigQuery-only for Cloud runs; no local/demo mode.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ TABLE_NAMES = ("dim_hospital", "dim_payer", "dim_procedure", "fct_standard_charg
 
 
 def get_mode() -> str:
-    """Effective mode: session state (UI) overrides env APP_MODE. Default 'local' (no creds)."""
-    return (st.session_state.get("app_data_source") or os.environ.get("APP_MODE") or "local").strip().lower()
+    """Effective mode: always 'bigquery' (Cloud / BigQuery-only app)."""
+    return "bigquery"
 
 
 def get_tables() -> tuple[str, ...]:
@@ -36,10 +36,8 @@ def get_tables() -> tuple[str, ...]:
 
 
 def get_active_source_label() -> str:
-    """Human-readable active source for sidebar (e.g. project.dataset or export path)."""
-    if get_mode() == "bigquery":
-        return f"{_bq_project()}.{_bq_dataset()}"
-    return str(_local_export_dir())
+    """Human-readable active source for sidebar (project.dataset when BQ configured)."""
+    return f"{_bq_project()}.{_bq_dataset()}"
 
 
 def _local_export_dir() -> Path:
@@ -112,58 +110,35 @@ def _read_local_table(table: str) -> pd.DataFrame:
 
 @st.cache_data
 def load_dim_hospital(_mode: Optional[str] = None) -> pd.DataFrame:
-    """Load dim_hospital; cached by data source mode."""
-    mode = _mode or get_mode()
-    if mode == "bigquery":
-        sql = f"SELECT * FROM {_bq_table('dim_hospital')}"
-        return _bq_query(sql)
-    # local
-    return _read_local_table("dim_hospital")
+    """Load dim_hospital from BigQuery; cached."""
+    sql = f"SELECT * FROM {_bq_table('dim_hospital')}"
+    return _bq_query(sql)
 
 
 @st.cache_data
 def load_dim_payer(_mode: Optional[str] = None) -> pd.DataFrame:
-    """Load dim_payer; cached by data source mode."""
-    mode = _mode or get_mode()
-    if mode == "bigquery":
-        sql = f"SELECT * FROM {_bq_table('dim_payer')}"
-        return _bq_query(sql)
-    return _read_local_table("dim_payer")
+    """Load dim_payer from BigQuery; cached."""
+    sql = f"SELECT * FROM {_bq_table('dim_payer')}"
+    return _bq_query(sql)
 
 
 def search_procedures(query: str, limit: int = 50) -> pd.DataFrame:
     """Search dim_procedure by billing_code or description; return up to limit rows."""
-    mode = get_mode()
     q = (query or "").strip()
     if not q:
-        if mode == "bigquery":
-            sql = f"SELECT billing_code, billing_code_type, description FROM {_bq_table('dim_procedure')} LIMIT {int(limit)}"
-            return _bq_query(sql)
-        df = _read_local_table("dim_procedure")
-        return df.head(limit) if not df.empty else df
-
+        sql = f"SELECT billing_code, billing_code_type, description FROM {_bq_table('dim_procedure')} LIMIT {int(limit)}"
+        return _bq_query(sql)
     q_like = f"%{q}%"
-    if mode == "bigquery":
-        sql = f"""
-        SELECT billing_code, billing_code_type, description
-        FROM {_bq_table('dim_procedure')}
-        WHERE LOWER(COALESCE(billing_code, '')) LIKE LOWER(@q)
-           OR LOWER(COALESCE(description, '')) LIKE LOWER(@q)
-        LIMIT {int(limit)}
-        """
-        from google.cloud.bigquery import ScalarQueryParameter
-        params = [ScalarQueryParameter("q", "STRING", q_like)]
-        return _bq_query(sql, params)
-
-    df = _read_local_table("dim_procedure")
-    if df.empty:
-        return df
-    q_lower = q.lower()
-    mask = (
-        df["billing_code"].astype(str).str.lower().str.contains(q_lower, na=False)
-        | df["description"].astype(str).str.lower().str.contains(q_lower, na=False)
-    )
-    return df.loc[mask].head(limit)
+    sql = f"""
+    SELECT billing_code, billing_code_type, description
+    FROM {_bq_table('dim_procedure')}
+    WHERE LOWER(COALESCE(billing_code, '')) LIKE LOWER(@q)
+       OR LOWER(COALESCE(description, '')) LIKE LOWER(@q)
+    LIMIT {int(limit)}
+    """
+    from google.cloud.bigquery import ScalarQueryParameter
+    params = [ScalarQueryParameter("q", "STRING", q_like)]
+    return _bq_query(sql, params)
 
 
 def get_rates(
@@ -175,63 +150,41 @@ def get_rates(
     billing_code_type: Optional[str] = None,
     limit: int = 500,
 ) -> pd.DataFrame:
-    """Get fact rows filtered by hospital_id and optional filters. Never load full fact in BQ."""
-    mode = get_mode()
+    """Get fact rows filtered by hospital_id and optional filters from BigQuery."""
     limit = max(1, min(int(limit), 5000))
-
-    if mode == "bigquery":
-        from google.cloud.bigquery import ScalarQueryParameter
-        conditions = ["hospital_id = @hospital_id"]
-        params = [ScalarQueryParameter("hospital_id", "STRING", hospital_id)]
-        if billing_code:
-            conditions.append("billing_code = @billing_code")
-            params.append(ScalarQueryParameter("billing_code", "STRING", billing_code))
-        if payer_name:
-            conditions.append("payer_name = @payer_name")
-            params.append(ScalarQueryParameter("payer_name", "STRING", payer_name))
-        if plan_name:
-            conditions.append("plan_name = @plan_name")
-            params.append(ScalarQueryParameter("plan_name", "STRING", plan_name))
-        if rate_category:
-            conditions.append("rate_category = @rate_category")
-            params.append(ScalarQueryParameter("rate_category", "STRING", rate_category))
-        if billing_code_type:
-            conditions.append("billing_code_type = @billing_code_type")
-            params.append(ScalarQueryParameter("billing_code_type", "STRING", billing_code_type))
-        where = " AND ".join(conditions)
-        sql = f"""
-        SELECT semantic_charge_sk, hospital_id, hospital_name, billing_code, billing_code_type, description,
-               payer_name, plan_name, rate_category, rate_amount, rate_unit, ingested_at
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        WHERE {where}
-        ORDER BY rate_amount DESC
-        LIMIT {limit}
-        """
-        return _bq_query(sql, params)
-
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return df
-    df = df.loc[df["hospital_id"].astype(str) == str(hospital_id)]
+    from google.cloud.bigquery import ScalarQueryParameter
+    conditions = ["hospital_id = @hospital_id"]
+    params = [ScalarQueryParameter("hospital_id", "STRING", hospital_id)]
     if billing_code:
-        df = df.loc[df["billing_code"].astype(str) == str(billing_code)]
+        conditions.append("billing_code = @billing_code")
+        params.append(ScalarQueryParameter("billing_code", "STRING", billing_code))
     if payer_name:
-        df = df.loc[df["payer_name"].astype(str) == str(payer_name)]
+        conditions.append("payer_name = @payer_name")
+        params.append(ScalarQueryParameter("payer_name", "STRING", payer_name))
     if plan_name:
-        df = df.loc[df["plan_name"].astype(str) == str(plan_name)]
+        conditions.append("plan_name = @plan_name")
+        params.append(ScalarQueryParameter("plan_name", "STRING", plan_name))
     if rate_category:
-        df = df.loc[df["rate_category"].astype(str) == str(rate_category)]
+        conditions.append("rate_category = @rate_category")
+        params.append(ScalarQueryParameter("rate_category", "STRING", rate_category))
     if billing_code_type:
-        df = df.loc[df["billing_code_type"].astype(str) == str(billing_code_type)]
-    cols = [c for c in ["semantic_charge_sk", "hospital_id", "hospital_name", "billing_code", "billing_code_type",
-                        "description", "payer_name", "plan_name", "rate_category", "rate_amount", "rate_unit", "ingested_at"] if c in df.columns]
-    return df[cols].sort_values("rate_amount", ascending=False).head(limit)
+        conditions.append("billing_code_type = @billing_code_type")
+        params.append(ScalarQueryParameter("billing_code_type", "STRING", billing_code_type))
+    where = " AND ".join(conditions)
+    sql = f"""
+    SELECT semantic_charge_sk, hospital_id, hospital_name, billing_code, billing_code_type, description,
+           payer_name, plan_name, rate_category, rate_amount, rate_unit, ingested_at
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    WHERE {where}
+    ORDER BY rate_amount DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql, params)
 
 
 @st.cache_data
 def get_overview_metrics(_mode: Optional[str] = None) -> dict:
-    """Counts and min/max ingested_at for fact and dims. Cached by data source mode."""
-    mode = _mode or get_mode()
+    """Counts and min/max ingested_at for fact and dims from BigQuery. Cached."""
     out = {
         "charges_rows": 0,
         "hospitals_rows": 0,
@@ -240,158 +193,95 @@ def get_overview_metrics(_mode: Optional[str] = None) -> dict:
         "min_ingested_at": None,
         "max_ingested_at": None,
     }
-
-    if mode == "bigquery":
-        project, dataset = _bq_project(), _bq_dataset()
-        # Single query for fact counts + min/max
-        sql_fact = f"""
-        SELECT COUNT(*) AS n, MIN(ingested_at) AS min_at, MAX(ingested_at) AS max_at
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        """
-        row = _bq_query(sql_fact).iloc[0]
-        out["charges_rows"] = int(row["n"] or 0)
-        out["min_ingested_at"] = row.get("min_at")
-        out["max_ingested_at"] = row.get("max_at")
-        for table, key in (
-            ("dim_hospital", "hospitals_rows"),
-            ("dim_payer", "payers_rows"),
-            ("dim_procedure", "procedures_rows"),
-        ):
-            r = _bq_query(f"SELECT COUNT(*) AS n FROM {_bq_table(table)}").iloc[0]
-            out[key] = int(r["n"] or 0)
-        return out
-
-    # local
+    sql_fact = f"""
+    SELECT COUNT(*) AS n, MIN(ingested_at) AS min_at, MAX(ingested_at) AS max_at
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    """
+    row = _bq_query(sql_fact).iloc[0]
+    out["charges_rows"] = int(row["n"] or 0)
+    out["min_ingested_at"] = row.get("min_at")
+    out["max_ingested_at"] = row.get("max_at")
     for table, key in (
-        ("fct_standard_charges_semantic", "charges_rows"),
         ("dim_hospital", "hospitals_rows"),
         ("dim_payer", "payers_rows"),
         ("dim_procedure", "procedures_rows"),
     ):
-        df = _read_local_table(table)
-        if df.empty:
-            continue
-        n = len(df)
-        out[key] = n
-        if table == "fct_standard_charges_semantic" and n and "ingested_at" in df.columns:
-            out["min_ingested_at"] = df["ingested_at"].min()
-            out["max_ingested_at"] = df["ingested_at"].max()
+        r = _bq_query(f"SELECT COUNT(*) AS n FROM {_bq_table(table)}").iloc[0]
+        out[key] = int(r["n"] or 0)
     return out
 
 
 @st.cache_data
 def get_rate_category_distribution(_mode: Optional[str] = None) -> pd.DataFrame:
-    """Rate category counts for overview. Cached by data source mode."""
-    mode = _mode or get_mode()
-    if mode == "bigquery":
-        sql = f"""
-        SELECT rate_category, COUNT(*) AS cnt
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        GROUP BY rate_category
-        ORDER BY cnt DESC
-        """
-        return _bq_query(sql)
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty or "rate_category" not in df.columns:
-        return pd.DataFrame(columns=["rate_category", "cnt"])
-    out = df["rate_category"].value_counts().reset_index()
-    out.columns = ["rate_category", "cnt"]
-    return out
+    """Rate category counts for overview from BigQuery. Cached."""
+    sql = f"""
+    SELECT rate_category, COUNT(*) AS cnt
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    GROUP BY rate_category
+    ORDER BY cnt DESC
+    """
+    return _bq_query(sql)
 
 
 def get_hospital_kpis(hospital_id: str) -> dict:
-    """KPIs for one hospital: total rows, distinct billing_code, distinct payer/plan, median/min/max rate."""
-    mode = get_mode()
-    if mode == "bigquery":
-        from google.cloud.bigquery import ScalarQueryParameter
-        sql = f"""
-        SELECT
-            COUNT(*) AS total_rows,
-            COUNT(DISTINCT billing_code) AS distinct_procedures,
-            COUNT(DISTINCT CONCAT(COALESCE(payer_name,''), '|', COALESCE(plan_name,''))) AS distinct_payer_plan,
-            APPROX_QUANTILES(rate_amount, 100)[OFFSET(50)] AS median_rate,
-            MIN(rate_amount) AS min_rate,
-            MAX(rate_amount) AS max_rate
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        WHERE hospital_id = @hospital_id
-        """
-        params = [ScalarQueryParameter("hospital_id", "STRING", hospital_id)]
-        row = _bq_query(sql, params).iloc[0]
-        return {
-            "total_rows": int(row["total_rows"] or 0),
-            "distinct_procedures": int(row["distinct_procedures"] or 0),
-            "distinct_payer_plan": int(row["distinct_payer_plan"] or 0),
-            "median_rate": float(row["median_rate"]) if row.get("median_rate") is not None else None,
-            "min_rate": float(row["min_rate"]) if row.get("min_rate") is not None else None,
-            "max_rate": float(row["max_rate"]) if row.get("max_rate") is not None else None,
-        }
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return {"total_rows": 0, "distinct_procedures": 0, "distinct_payer_plan": 0, "median_rate": None, "min_rate": None, "max_rate": None}
-    sub = df.loc[df["hospital_id"].astype(str) == str(hospital_id)]
-    if sub.empty:
-        return {"total_rows": 0, "distinct_procedures": 0, "distinct_payer_plan": 0, "median_rate": None, "min_rate": None, "max_rate": None}
-    rate = sub["rate_amount"].astype(float, errors="coerce").dropna()
+    """KPIs for one hospital from BigQuery: total rows, distinct billing_code, distinct payer/plan, median/min/max rate."""
+    from google.cloud.bigquery import ScalarQueryParameter
+    sql = f"""
+    SELECT
+        COUNT(*) AS total_rows,
+        COUNT(DISTINCT billing_code) AS distinct_procedures,
+        COUNT(DISTINCT CONCAT(COALESCE(payer_name,''), '|', COALESCE(plan_name,''))) AS distinct_payer_plan,
+        APPROX_QUANTILES(rate_amount, 100)[OFFSET(50)] AS median_rate,
+        MIN(rate_amount) AS min_rate,
+        MAX(rate_amount) AS max_rate
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    WHERE hospital_id = @hospital_id
+    """
+    params = [ScalarQueryParameter("hospital_id", "STRING", hospital_id)]
+    row = _bq_query(sql, params).iloc[0]
     return {
-        "total_rows": len(sub),
-        "distinct_procedures": sub["billing_code"].nunique(),
-        "distinct_payer_plan": sub.apply(lambda r: f"{r.get('payer_name') or ''}|{r.get('plan_name') or ''}", axis=1).nunique(),
-        "median_rate": float(rate.median()) if len(rate) else None,
-        "min_rate": float(rate.min()) if len(rate) else None,
-        "max_rate": float(rate.max()) if len(rate) else None,
+        "total_rows": int(row["total_rows"] or 0),
+        "distinct_procedures": int(row["distinct_procedures"] or 0),
+        "distinct_payer_plan": int(row["distinct_payer_plan"] or 0),
+        "median_rate": float(row["median_rate"]) if row.get("median_rate") is not None else None,
+        "min_rate": float(row["min_rate"]) if row.get("min_rate") is not None else None,
+        "max_rate": float(row["max_rate"]) if row.get("max_rate") is not None else None,
     }
 
 
 def get_hospital_payer_coverage(hospital_id: str, limit: int = 100) -> pd.DataFrame:
-    """Payer/plan row counts for one hospital."""
+    """Payer/plan row counts for one hospital from BigQuery."""
     limit = max(1, min(int(limit), 500))
-    mode = get_mode()
-    if mode == "bigquery":
-        from google.cloud.bigquery import ScalarQueryParameter
-        sql = f"""
-        SELECT payer_name, plan_name, COUNT(*) AS row_count
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        WHERE hospital_id = @hospital_id
-        GROUP BY payer_name, plan_name
-        ORDER BY row_count DESC
-        LIMIT {limit}
-        """
-        return _bq_query(sql, [ScalarQueryParameter("hospital_id", "STRING", hospital_id)])
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return pd.DataFrame(columns=["payer_name", "plan_name", "row_count"])
-    sub = df.loc[df["hospital_id"].astype(str) == str(hospital_id)]
-    out = sub.groupby(["payer_name", "plan_name"], dropna=False).size().reset_index(name="row_count")
-    return out.sort_values("row_count", ascending=False).head(limit)
+    from google.cloud.bigquery import ScalarQueryParameter
+    sql = f"""
+    SELECT payer_name, plan_name, COUNT(*) AS row_count
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    WHERE hospital_id = @hospital_id
+    GROUP BY payer_name, plan_name
+    ORDER BY row_count DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql, [ScalarQueryParameter("hospital_id", "STRING", hospital_id)])
 
 
 def get_hospital_top_procedures(hospital_id: str, limit: int = 50) -> pd.DataFrame:
-    """Top procedures by row count for one hospital."""
+    """Top procedures by row count for one hospital from BigQuery."""
     limit = max(1, min(int(limit), 200))
-    mode = get_mode()
-    if mode == "bigquery":
-        from google.cloud.bigquery import ScalarQueryParameter
-        sql = f"""
-        SELECT billing_code, billing_code_type, description, COUNT(*) AS row_count
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        WHERE hospital_id = @hospital_id
-        GROUP BY billing_code, billing_code_type, description
-        ORDER BY row_count DESC
-        LIMIT {limit}
-        """
-        return _bq_query(sql, [ScalarQueryParameter("hospital_id", "STRING", hospital_id)])
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return pd.DataFrame(columns=["billing_code", "billing_code_type", "description", "row_count"])
-    sub = df.loc[df["hospital_id"].astype(str) == str(hospital_id)]
-    grp = sub.groupby(["billing_code", "billing_code_type", "description"], dropna=False).size().reset_index(name="row_count")
-    return grp.sort_values("row_count", ascending=False).head(limit)
+    from google.cloud.bigquery import ScalarQueryParameter
+    sql = f"""
+    SELECT billing_code, billing_code_type, description, COUNT(*) AS row_count
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    WHERE hospital_id = @hospital_id
+    GROUP BY billing_code, billing_code_type, description
+    ORDER BY row_count DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql, [ScalarQueryParameter("hospital_id", "STRING", hospital_id)])
 
 
 @st.cache_data
 def get_data_quality_metrics(_mode: Optional[str] = None) -> dict:
-    """Null rates and UNKNOWN billing_code_type count. Cached by data source mode."""
-    mode = _mode or get_mode()
+    """Null rates and UNKNOWN billing_code_type count from BigQuery. Cached."""
     out = {
         "pct_null_hospital_id": 0.0,
         "pct_null_billing_code": 0.0,
@@ -400,91 +290,71 @@ def get_data_quality_metrics(_mode: Optional[str] = None) -> dict:
         "unknown_billing_code_type_count": 0,
         "total_rows": 0,
     }
-    if mode == "bigquery":
-        sql = f"""
-        SELECT
-            COUNT(*) AS n,
-            COUNTIF(hospital_id IS NULL) AS null_hid,
-            COUNTIF(billing_code IS NULL) AS null_bc,
-            COUNTIF(rate_amount IS NULL) AS null_amt,
-            COUNTIF(description IS NULL) AS null_desc,
-            COUNTIF(LOWER(COALESCE(billing_code_type, '')) = 'unknown') AS unknown_bc_type
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        """
-        row = _bq_query(sql).iloc[0]
-        n = int(row["n"] or 0)
-        out["total_rows"] = n
-        if n:
-            out["pct_null_hospital_id"] = round(100.0 * int(row["null_hid"] or 0) / n, 2)
-            out["pct_null_billing_code"] = round(100.0 * int(row["null_bc"] or 0) / n, 2)
-            out["pct_null_rate_amount"] = round(100.0 * int(row["null_amt"] or 0) / n, 2)
-            out["pct_null_description"] = round(100.0 * int(row["null_desc"] or 0) / n, 2)
-            out["unknown_billing_code_type_count"] = int(row["unknown_bc_type"] or 0)
-        return out
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return out
-    n = len(df)
+    sql = f"""
+    SELECT
+        COUNT(*) AS n,
+        COUNTIF(hospital_id IS NULL) AS null_hid,
+        COUNTIF(billing_code IS NULL) AS null_bc,
+        COUNTIF(rate_amount IS NULL) AS null_amt,
+        COUNTIF(description IS NULL) AS null_desc,
+        COUNTIF(LOWER(COALESCE(billing_code_type, '')) = 'unknown') AS unknown_bc_type
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    """
+    row = _bq_query(sql).iloc[0]
+    n = int(row["n"] or 0)
     out["total_rows"] = n
-    for col, key in (("hospital_id", "pct_null_hospital_id"), ("billing_code", "pct_null_billing_code"), ("rate_amount", "pct_null_rate_amount"), ("description", "pct_null_description")):
-        if col in df.columns:
-            out[key] = round(100.0 * df[col].isna().sum() / n, 2)
-    if "billing_code_type" in df.columns:
-        out["unknown_billing_code_type_count"] = int(df["billing_code_type"].astype(str).str.lower().eq("unknown").sum())
+    if n:
+        out["pct_null_hospital_id"] = round(100.0 * int(row["null_hid"] or 0) / n, 2)
+        out["pct_null_billing_code"] = round(100.0 * int(row["null_bc"] or 0) / n, 2)
+        out["pct_null_rate_amount"] = round(100.0 * int(row["null_amt"] or 0) / n, 2)
+        out["pct_null_description"] = round(100.0 * int(row["null_desc"] or 0) / n, 2)
+        out["unknown_billing_code_type_count"] = int(row["unknown_bc_type"] or 0)
     return out
 
 
 def get_outlier_rates(limit: int = 100) -> pd.DataFrame:
-    """Top rate_amount rows (outliers). Capped query."""
+    """Top rate_amount rows (outliers) from BigQuery. Capped query."""
     limit = max(1, min(int(limit), 500))
-    mode = get_mode()
-    if mode == "bigquery":
-        sql = f"""
-        SELECT hospital_id, hospital_name, billing_code, description, rate_category, rate_amount, payer_name, plan_name
-        FROM {_bq_table('fct_standard_charges_semantic')}
-        ORDER BY rate_amount DESC
-        LIMIT {limit}
-        """
-        return _bq_query(sql)
-    df = _read_local_table("fct_standard_charges_semantic")
-    if df.empty:
-        return pd.DataFrame()
-    cols = [c for c in ["hospital_id", "hospital_name", "billing_code", "description", "rate_category", "rate_amount", "payer_name", "plan_name"] if c in df.columns]
-    return df[cols].sort_values("rate_amount", ascending=False).head(limit)
+    sql = f"""
+    SELECT hospital_id, hospital_name, billing_code, description, rate_category, rate_amount, payer_name, plan_name
+    FROM {_bq_table('fct_standard_charges_semantic')}
+    ORDER BY rate_amount DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql)
 
 
 def ensure_data_available() -> tuple[bool, str]:
-    """Check data availability. Returns (ok, message). When local + SAMPLE_DATA=1, auto-bootstrap if exports missing."""
-    mode = get_mode()
-    if mode == "local":
-        try:
-            from lib import bootstrap
-            bootstrap.ensure_demo_exports_exist(st)
-        except Exception:
-            pass  # proceed to missing check; bootstrap may have failed
-    if mode == "bigquery":
-        from lib import bq_auth
-        ok_validation, validation_msg = bq_auth.validate_bigquery_secrets()
-        if not ok_validation:
-            return False, f"{validation_msg} [Mode: bigquery]"
-        client, err = bq_auth.get_bq_client()
-        if err or client is None:
-            return False, err or "BigQuery not configured. [Mode: bigquery]"
-        project_id, dataset, _loc, _ = bq_auth.get_bq_config()
-        if not project_id or not dataset:
-            return False, "BigQuery not configured: set BQ_PROJECT and BQ_DATASET_MARTS in Streamlit secrets or env. [Mode: bigquery]"
-        try:
-            sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
-            client.query(sql).result()
-            return True, ""
-        except Exception as e:
-            return False, f"BigQuery unavailable: {e} [Mode: bigquery]"
-    export_dir = _local_export_dir()
-    required = ["dim_hospital", "fct_standard_charges_semantic"]
-    missing = [t for t in required if not (export_dir / f"{t}.parquet").exists() and not (export_dir / f"{t}.csv").exists()]
-    if missing:
-        return False, f"Local data missing in {export_dir}: {', '.join(missing)} (need .parquet or .csv). Run scripts/run_local_bi.ps1 or scripts/mvp_local.ps1 first."
-    return True, ""
+    """Check data availability. BigQuery-only: returns (ok, message). Stops early if secrets missing (no local path attempt)."""
+    from lib import debug
+    ok_secrets, missing_keys = debug.has_bq_secrets()
+    if not ok_secrets:
+        present = debug.secrets_keys()
+        msg_lines = [
+            "BigQuery selected but secrets are missing or incomplete.",
+            "Present secrets keys: " + (", ".join(present) if present else "(none)"),
+            "Missing keys: " + ", ".join(missing_keys),
+            "Expected TOML structure: [gcp_service_account] with type, project_id, private_key_id, private_key, client_email; and BQ_PROJECT, BQ_LOCATION, BQ_DATASET_MARTS.",
+        ]
+        return False, "\n".join(msg_lines)
+    from lib import bq_auth
+    client, err = bq_auth.get_bq_client()
+    if err or client is None:
+        present = debug.secrets_keys()
+        return False, (
+            "BigQuery client creation failed. "
+            "Present secrets keys: " + (", ".join(present) if present else "(none)") + ". "
+            + (err or "Unknown error.")
+        )
+    project_id, dataset, _loc, _ = bq_auth.get_bq_config()
+    if not project_id or not dataset:
+        return False, "BigQuery not configured: set BQ_PROJECT and BQ_DATASET_MARTS in Streamlit secrets or env."
+    try:
+        sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
+        client.query(sql).result()
+        return True, ""
+    except Exception as e:
+        return False, f"BigQuery unavailable: {e}"
 
 
 def get_local_exports_instructions() -> str:
