@@ -1,6 +1,7 @@
 streamlit
 pandas
 pyarrow
+db-dtypes
 google-cloud-bigquery
 google-auth
 python-dotenv

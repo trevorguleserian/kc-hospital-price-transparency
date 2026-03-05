@@ -1,0 +1,12 @@
+# Root requirements; Streamlit app uses apps/streamlit_app/requirements.txt
+# Include BigQuery->Pandas deps for to_dataframe() (db-dtypes, pyarrow)
+streamlit
+pandas
+pyarrow
+db-dtypes
+google-cloud-bigquery
+google-auth
+python-dotenv
+dbt-core
+dbt-duckdb
+duckdb

@@ -21,9 +21,19 @@ with st.sidebar:
     with st.expander("Debug (safe)", expanded=False):
         info = debug.safe_runtime_info()
         bq_ver = info.get("google_cloud_bigquery_version")
+        pa_ver = info.get("pyarrow_version")
+        db_ver = info.get("db_dtypes_version")
         runtime_line = f"Python {info.get('python_version', '')} | {info.get('platform', '')}"
         if bq_ver:
-            runtime_line += f" | google-cloud-bigquery {bq_ver}"
+            runtime_line += f" | bigquery {bq_ver}"
+        if pa_ver:
+            runtime_line += f" | pyarrow {pa_ver}"
+        else:
+            runtime_line += " | pyarrow not installed"
+        if db_ver:
+            runtime_line += f" | db_dtypes {db_ver}"
+        else:
+            runtime_line += " | db_dtypes not installed"
         st.caption(runtime_line)
         st.text("Secret keys present: " + ", ".join(debug.secrets_keys()) if debug.secrets_keys() else "(none)")
         st.text("gcp_service_account type: " + debug.get_gcp_sa_type())

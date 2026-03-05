@@ -108,6 +108,16 @@ def safe_runtime_info() -> dict:
         info["google_cloud_bigquery_version"] = getattr(_bq, "__version__", "unknown")
     except Exception:
         info["google_cloud_bigquery_version"] = None
+    try:
+        import pyarrow as _pa
+        info["pyarrow_version"] = getattr(_pa, "__version__", "unknown")
+    except Exception:
+        info["pyarrow_version"] = None
+    try:
+        import db_dtypes
+        info["db_dtypes_version"] = getattr(db_dtypes, "__version__", "unknown")
+    except Exception:
+        info["db_dtypes_version"] = None
     return info
 
 
