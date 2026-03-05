@@ -13,17 +13,17 @@ with base as (
 
 parsed as (
   select
-    cast(base.source_file_name as varchar) as source_file_name,
+    cast(base.source_file_name as string) as source_file_name,
     base.ingested_at,
     base.rate_type,
     base.rate_amount,
-    cast(base.description as varchar) as description,
-    cast(base.billing_code as varchar) as billing_code,
-    cast(base.payer_name as varchar) as payer_name,
-    cast(base.plan_name as varchar) as plan_name,
+    cast(base.description as string) as description,
+    cast(base.billing_code as string) as billing_code,
+    cast(base.payer_name as string) as payer_name,
+    cast(base.plan_name as string) as plan_name,
     coalesce(
-      cast(base.source_format as varchar),
-      case when lower(coalesce(cast(base.source_file_name as varchar), '')) like '%.json%' then 'json' when lower(coalesce(cast(base.source_file_name as varchar), '')) like '%.csv%' then 'csv' else null end
+      cast(base.source_format as string),
+      case when lower(coalesce(cast(base.source_file_name as string), '')) like '%.json%' then 'json' when lower(coalesce(cast(base.source_file_name as string), '')) like '%.csv%' then 'csv' else null end
     ) as source_format,
     regexp_replace(base.source_file_name, '^.*[\\\\/]', '') as filename_only,
     regexp_replace(regexp_replace(base.source_file_name, '^.*[\\\\/]', ''), '\\.(csv|json|parquet)$', '') as filename_no_ext
@@ -53,9 +53,9 @@ final as (
     end as source_system,
     {{ classify_billing_code_type('hosp.billing_code') }} as billing_code_type
     {% if var('execution_mode') == 'local' %}
-    , coalesce(hosp.payer_name, cast(null as varchar)) as payer_name
-    , coalesce(hosp.plan_name, cast(null as varchar)) as plan_name
-    , cast(null as varchar) as raw_rate_json
+    , coalesce(hosp.payer_name, cast(null as string)) as payer_name
+    , coalesce(hosp.plan_name, cast(null as string)) as plan_name
+    , cast(null as string) as raw_rate_json
     {% endif %}
   from hosp
 ),

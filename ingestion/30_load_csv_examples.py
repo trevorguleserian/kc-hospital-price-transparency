@@ -233,9 +233,16 @@ def load_csv_file_to_bigquery(
     """
     encoding, delimiter, row1, row2, headers = read_csv_preamble_and_headers(file_path)
     preamble_kv = {}
-    for i in range(0, len(row1) - 1, 2):
-        if row1[i].strip():
-            preamble_kv[row1[i]] = row1[i + 1]
+    # Prefer row2 values when row1 looks like labels and row2 has values (CMS PT: row1=labels, row2=data).
+    if row2 and len(row2) >= len(row1):
+        for i in range(len(row1)):
+            if row1[i].strip():
+                preamble_kv[row1[i].strip()] = row2[i] if i < len(row2) else ""
+    else:
+        # Fallback: key-value pairs within row1 (alternating key, value).
+        for i in range(0, len(row1) - 1, 2):
+            if row1[i].strip():
+                preamble_kv[row1[i].strip()] = row1[i + 1]
     row1_raw = json.dumps(row1, ensure_ascii=False)
     row2_raw = json.dumps(row2, ensure_ascii=False)
     header_count = len(headers)

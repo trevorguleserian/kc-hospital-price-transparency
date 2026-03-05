@@ -22,8 +22,8 @@ with unioned as (
 with_wide as (
   select
     u.*,
-    cast(null as varchar) as billing_class,
-    cast(null as varchar) as run_id,
+    cast(null as string) as billing_class,
+    cast(null as string) as run_id,
     case when upper(u.rate_type) = 'GROSS_CHARGE' then u.rate_amount end as gross_charge,
     case when upper(u.rate_type) in ('CASH', 'DISCOUNTED_CASH_PRICE') then u.rate_amount end as discounted_cash,
     case when upper(u.rate_type) = 'MINIMUM' then u.rate_amount end as minimum,

@@ -8,4 +8,4 @@ with cts as (
 )
 select 1 as warn_high_unknown_pct
 from cts
-where total > 0 and (cast(unknown_count as float) / total) >= 0.95
+where total > 0 and (cast(unknown_count as FLOAT64) / total) >= 0.95

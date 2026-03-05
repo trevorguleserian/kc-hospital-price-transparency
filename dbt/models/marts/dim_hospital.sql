@@ -44,13 +44,20 @@ csv_registry as (
   from {{ source('pt_analytics', 'pt_csv_registry') }}
 ),
 
+metadata_clean as (
+  select source_file_name, hospital_name_clean as metadata_hospital_name_clean
+  from {{ ref('stg_hospital_metadata') }}
+),
+
 enriched as (
   select
     b.source_file_name,
     cast(b.source_system as string) as source_system,
-    r.preamble_name
+    r.preamble_name,
+    m.metadata_hospital_name_clean
   from base b
   left join csv_registry r on b.source_file_name = r.source_file_name
+  left join metadata_clean m on b.source_file_name = m.source_file_name
 ),
 
 -- Derive display name from source_file_name: strip extension, _standardcharges, leading digits/underscore; replace _/- with space; collapse spaces; initcap.
@@ -59,6 +66,7 @@ derived_from_file as (
     source_file_name,
     source_system,
     preamble_name,
+    metadata_hospital_name_clean,
     initcap(
       trim(
         (
@@ -81,25 +89,24 @@ derived_from_file as (
   from enriched
 ),
 
--- hospital_name_clean: prefer preamble, else derived from file, else source_file_name (last resort). Then collapse spaces.
+-- hospital_name_clean: prefer metadata (CSV row 2 / JSON), else preamble, else derived from file, else source_file_name. Then collapse spaces.
 with_clean as (
   select
     source_file_name,
     source_system,
     coalesce(
+      nullif(trim(metadata_hospital_name_clean), ''),
       nullif(trim(preamble_name), ''),
       nullif(trim(derived_name), ''),
       source_file_name
     ) as hospital_name_raw,
     trim(
-      (
+      regexp_replace(
         regexp_replace(
-          regexp_replace(
-            coalesce(nullif(trim(preamble_name), ''), nullif(trim(derived_name), ''), source_file_name),
-            r'[_\-\s]+', ' '
-          ),
-          r' +', ' '
-        )
+          coalesce(nullif(trim(metadata_hospital_name_clean), ''), nullif(trim(preamble_name), ''), nullif(trim(derived_name), ''), source_file_name),
+          r'[_\-\s]+', ' '
+        ),
+        r' +', ' '
       )
     ) as hospital_name_clean
   from derived_from_file

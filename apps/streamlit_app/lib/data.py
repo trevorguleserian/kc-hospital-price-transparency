@@ -122,18 +122,196 @@ def load_dim_payer(_mode: Optional[str] = None) -> pd.DataFrame:
     return _bq_query(sql)
 
 
+@st.cache_data
+def load_dim_payer_harmonized(_mode: Optional[str] = None) -> pd.DataFrame:
+    """Load dim_payer_harmonized (payer_family, plan_family) from BigQuery; cached."""
+    sql = f"SELECT payer_family, plan_family FROM {_bq_table('dim_payer_harmonized')}"
+    return _bq_query(sql)
+
+
+@st.cache_data
+def get_hospital_comparison(
+    billing_code: str,
+    payer_family: str,
+    rate_category: str,
+    rate_unit: str,
+    plan_family: Optional[str] = None,
+    billing_code_type: Optional[str] = None,
+    hospital_ids: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """
+    Query agg_hospital_procedure_compare joined to dim_hospital (hospital_name_clean) and
+    dim_procedure_harmonized (canonical_description). Like-to-like: billing_code, rate_category,
+    rate_unit, payer_family required; plan_family optional. All filters parameterized.
+    """
+    from google.cloud.bigquery import ArrayQueryParameter, QueryJobConfig, ScalarQueryParameter
+
+    conditions = [
+        "a.billing_code = @billing_code",
+        "a.payer_family = @payer_family",
+        "a.rate_category = @rate_category",
+        "a.rate_unit = @rate_unit",
+    ]
+    params = [
+        ScalarQueryParameter("billing_code", "STRING", (billing_code or "").strip()),
+        ScalarQueryParameter("payer_family", "STRING", (payer_family or "").strip()),
+        ScalarQueryParameter("rate_category", "STRING", (rate_category or "").strip()),
+        ScalarQueryParameter("rate_unit", "STRING", (rate_unit or "").strip()),
+    ]
+    if plan_family is not None and str(plan_family).strip():
+        conditions.append("a.plan_family = @plan_family")
+        params.append(ScalarQueryParameter("plan_family", "STRING", str(plan_family).strip()))
+    if billing_code_type and (str(billing_code_type).strip().upper() not in ("", "ANY", "— ANY —")):
+        conditions.append("COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = @billing_code_type")
+        params.append(ScalarQueryParameter("billing_code_type", "STRING", str(billing_code_type).strip()))
+    if hospital_ids:
+        conditions.append("a.hospital_id IN UNNEST(@hospital_ids)")
+        params.append(ArrayQueryParameter("hospital_ids", "STRING", hospital_ids))
+
+    where = " AND ".join(conditions)
+    sql = f"""
+    SELECT
+      COALESCE(d.hospital_name_clean, a.hospital_id) AS hospital_name_clean,
+      COALESCE(proc.canonical_description, '') AS canonical_description,
+      a.min_rate,
+      a.max_rate,
+      a.approx_median_rate,
+      a.row_count,
+      a.rate_category,
+      a.rate_unit
+    FROM {_bq_table('agg_hospital_procedure_compare')} a
+    LEFT JOIN {_bq_table('dim_hospital')} d ON a.hospital_id = d.hospital_id
+    LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
+      ON a.billing_code = proc.billing_code AND COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
+    WHERE {where}
+    ORDER BY a.approx_median_rate DESC
+    """
+    job_config = QueryJobConfig(query_parameters=params)
+    client = _bq_client()
+    return client.query(sql, job_config=job_config).to_dataframe()
+
+
+@st.cache_data
+def get_payer_plan_compare_detail(
+    billing_code: str,
+    rate_category: str,
+    rate_unit: str,
+    payer_family: Optional[str] = None,
+    plan_family: Optional[str] = None,
+    billing_code_type: Optional[str] = None,
+    hospital_ids: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """
+    Filtered rows from agg_payer_plan_compare for payer/plan comparison page. Optional
+    payer_family/plan_family for like-to-like. Joins dim_procedure_harmonized for canonical_description.
+    All filters parameterized; no full table scan.
+    """
+    from google.cloud.bigquery import ArrayQueryParameter, QueryJobConfig, ScalarQueryParameter
+
+    conditions = [
+        "a.billing_code = @billing_code",
+        "a.rate_category = @rate_category",
+        "a.rate_unit = @rate_unit",
+    ]
+    params = [
+        ScalarQueryParameter("billing_code", "STRING", (billing_code or "").strip()),
+        ScalarQueryParameter("rate_category", "STRING", (rate_category or "").strip()),
+        ScalarQueryParameter("rate_unit", "STRING", (rate_unit or "").strip()),
+    ]
+    if payer_family is not None and str(payer_family).strip():
+        conditions.append("a.payer_family = @payer_family")
+        params.append(ScalarQueryParameter("payer_family", "STRING", str(payer_family).strip()))
+    if plan_family is not None and str(plan_family).strip():
+        conditions.append("a.plan_family = @plan_family")
+        params.append(ScalarQueryParameter("plan_family", "STRING", str(plan_family).strip()))
+    if billing_code_type and (str(billing_code_type).strip().upper() not in ("", "ANY", "— ANY —")):
+        conditions.append("COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = @billing_code_type")
+        params.append(ScalarQueryParameter("billing_code_type", "STRING", str(billing_code_type).strip()))
+    if hospital_ids:
+        conditions.append("a.hospital_id IN UNNEST(@hospital_ids)")
+        params.append(ArrayQueryParameter("hospital_ids", "STRING", hospital_ids))
+
+    where = " AND ".join(conditions)
+    sql = f"""
+    SELECT
+      a.billing_code,
+      a.billing_code_type,
+      a.payer_family,
+      a.plan_family,
+      a.rate_category,
+      a.rate_unit,
+      a.hospital_id,
+      a.min_rate,
+      a.max_rate,
+      a.approx_median_rate,
+      a.row_count,
+      COALESCE(proc.canonical_description, '') AS canonical_description
+    FROM {_bq_table('agg_payer_plan_compare')} a
+    LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
+      ON a.billing_code = proc.billing_code AND COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
+    WHERE {where}
+    """
+    job_config = QueryJobConfig(query_parameters=params)
+    client = _bq_client()
+    return client.query(sql, job_config=job_config).to_dataframe()
+
+
+def get_rejects_summary(
+    billing_code: str,
+    rate_category: str,
+    rate_unit: str,
+    limit_rows: int = 2000,
+) -> pd.DataFrame:
+    """
+    Rejected rows (is_comparable = FALSE) for the given filters: aggregated by comparability_reason
+    with row_count and optional sample. Reads from fct_rates_comparable_rejects; parameterized and capped.
+    """
+    from google.cloud.bigquery import QueryJobConfig, ScalarQueryParameter
+
+    limit_rows = max(1, min(int(limit_rows), 2000))
+    sql = f"""
+    SELECT
+      comparability_reason,
+      COUNT(*) AS row_count,
+      ANY_VALUE(payer_name) AS sample_payer_name,
+      ANY_VALUE(hospital_id) AS sample_hospital_id
+    FROM (
+      SELECT comparability_reason, payer_name, hospital_id
+      FROM {_bq_table('fct_rates_comparable_rejects')}
+      WHERE billing_code = @billing_code
+        AND rate_category = @rate_category
+        AND rate_unit = @rate_unit
+      LIMIT {limit_rows}
+    ) limited
+    GROUP BY comparability_reason
+    ORDER BY row_count DESC
+    """
+    params = [
+        ScalarQueryParameter("billing_code", "STRING", (billing_code or "").strip()),
+        ScalarQueryParameter("rate_category", "STRING", (rate_category or "").strip()),
+        ScalarQueryParameter("rate_unit", "STRING", (rate_unit or "").strip()),
+    ]
+    job_config = QueryJobConfig(query_parameters=params)
+    client = _bq_client()
+    return client.query(sql, job_config=job_config).to_dataframe()
+
+
 def search_procedures(query: str, limit: int = 50) -> pd.DataFrame:
-    """Search dim_procedure by billing_code or description; return up to limit rows."""
+    """Search dim_procedure_harmonized by billing_code or canonical description; returns description = canonical_description for display."""
     q = (query or "").strip()
     if not q:
-        sql = f"SELECT billing_code, billing_code_type, description FROM {_bq_table('dim_procedure')} LIMIT {int(limit)}"
+        sql = f"""
+        SELECT billing_code, billing_code_type, canonical_description AS description
+        FROM {_bq_table('dim_procedure_harmonized')}
+        LIMIT {int(limit)}
+        """
         return _bq_query(sql)
     q_like = f"%{q}%"
     sql = f"""
-    SELECT billing_code, billing_code_type, description
-    FROM {_bq_table('dim_procedure')}
+    SELECT billing_code, billing_code_type, canonical_description AS description
+    FROM {_bq_table('dim_procedure_harmonized')}
     WHERE LOWER(COALESCE(billing_code, '')) LIKE LOWER(@q)
-       OR LOWER(COALESCE(description, '')) LIKE LOWER(@q)
+       OR LOWER(COALESCE(canonical_description, '')) LIKE LOWER(@q)
     LIMIT {int(limit)}
     """
     from google.cloud.bigquery import ScalarQueryParameter
@@ -142,44 +320,117 @@ def search_procedures(query: str, limit: int = 50) -> pd.DataFrame:
 
 
 def get_rates(
-    hospital_id: str,
+    hospital_id: Optional[str] = None,
+    hospital_ids: Optional[list[str]] = None,
     billing_code: Optional[str] = None,
     payer_name: Optional[str] = None,
     plan_name: Optional[str] = None,
+    payer_family: Optional[str] = None,
+    plan_family: Optional[str] = None,
     rate_category: Optional[str] = None,
+    rate_unit: Optional[str] = None,
     billing_code_type: Optional[str] = None,
+    use_comparable: bool = True,
     limit: int = 500,
 ) -> pd.DataFrame:
-    """Get fact rows filtered by hospital_id and optional filters from BigQuery."""
-    limit = max(1, min(int(limit), 5000))
-    from google.cloud.bigquery import ScalarQueryParameter
-    conditions = ["hospital_id = @hospital_id"]
-    params = [ScalarQueryParameter("hospital_id", "STRING", hospital_id)]
-    if billing_code:
-        conditions.append("billing_code = @billing_code")
-        params.append(ScalarQueryParameter("billing_code", "STRING", billing_code))
-    if payer_name:
-        conditions.append("payer_name = @payer_name")
-        params.append(ScalarQueryParameter("payer_name", "STRING", payer_name))
-    if plan_name:
-        conditions.append("plan_name = @plan_name")
-        params.append(ScalarQueryParameter("plan_name", "STRING", plan_name))
-    if rate_category:
-        conditions.append("rate_category = @rate_category")
-        params.append(ScalarQueryParameter("rate_category", "STRING", rate_category))
-    if billing_code_type:
-        conditions.append("billing_code_type = @billing_code_type")
-        params.append(ScalarQueryParameter("billing_code_type", "STRING", billing_code_type))
-    where = " AND ".join(conditions)
-    sql = f"""
-    SELECT semantic_charge_sk, hospital_id, hospital_name, billing_code, billing_code_type, description,
-           payer_name, plan_name, rate_category, rate_amount, rate_unit, ingested_at
-    FROM {_bq_table('fct_standard_charges_semantic')}
-    WHERE {where}
-    ORDER BY rate_amount DESC
-    LIMIT {limit}
     """
-    return _bq_query(sql, params)
+    Get rate rows from BigQuery. When use_comparable=True (default), query fct_rates_comparable_harmonized
+    with required billing_code, rate_category, rate_unit; optional payer_family, plan_family, hospital filter.
+    When use_comparable=False, query fct_standard_charges_semantic with required hospital_id (current behavior).
+    Returns hospital_name_clean, description (canonical), payer_family, plan_family where available.
+    """
+    limit = max(1, min(int(limit), 5000))
+    from google.cloud.bigquery import ArrayQueryParameter, QueryJobConfig, ScalarQueryParameter
+
+    if use_comparable:
+        # Required: billing_code, rate_category, rate_unit. Optional: payer_family, plan_family, billing_code_type, hospital_id or hospital_ids.
+        if not billing_code or not rate_category or not rate_unit:
+            return pd.DataFrame()
+        conditions = [
+            "f.billing_code = @billing_code",
+            "f.rate_category = @rate_category",
+            "f.rate_unit = @rate_unit",
+        ]
+        params = [
+            ScalarQueryParameter("billing_code", "STRING", (billing_code or "").strip()),
+            ScalarQueryParameter("rate_category", "STRING", rate_category.strip()),
+            ScalarQueryParameter("rate_unit", "STRING", rate_unit.strip()),
+        ]
+        if billing_code_type and str(billing_code_type).strip().upper() not in ("", "ANY", "— ANY —"):
+            conditions.append("COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = @billing_code_type")
+            params.append(ScalarQueryParameter("billing_code_type", "STRING", str(billing_code_type).strip()))
+        if payer_family is not None and str(payer_family).strip():
+            conditions.append("f.payer_family = @payer_family")
+            params.append(ScalarQueryParameter("payer_family", "STRING", str(payer_family).strip()))
+        if plan_family is not None and str(plan_family).strip():
+            conditions.append("f.plan_family = @plan_family")
+            params.append(ScalarQueryParameter("plan_family", "STRING", str(plan_family).strip()))
+        if hospital_ids:
+            conditions.append("f.hospital_id IN UNNEST(@hospital_ids)")
+            params.append(ArrayQueryParameter("hospital_ids", "STRING", hospital_ids))
+        elif hospital_id and str(hospital_id).strip():
+            conditions.append("f.hospital_id = @hospital_id")
+            params.append(ScalarQueryParameter("hospital_id", "STRING", str(hospital_id).strip()))
+        where = " AND ".join(conditions)
+        sql = f"""
+        SELECT f.semantic_charge_sk, f.hospital_id,
+               COALESCE(d.hospital_name_clean, f.hospital_name) AS hospital_name_clean,
+               f.billing_code, f.billing_code_type,
+               COALESCE(proc.canonical_description, f.description) AS description,
+               f.payer_family, f.plan_family,
+               f.rate_category, f.rate_amount, f.rate_unit, f.ingested_at
+        FROM {_bq_table('fct_rates_comparable_harmonized')} f
+        LEFT JOIN {_bq_table('dim_hospital')} d ON f.hospital_id = d.hospital_id
+        LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
+          ON f.billing_code = proc.billing_code AND COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
+        WHERE {where}
+        ORDER BY f.rate_amount DESC
+        LIMIT {limit}
+        """
+        job_config = QueryJobConfig(query_parameters=params)
+        return _bq_client().query(sql, job_config=job_config).to_dataframe()
+    else:
+        # Semantic fact: hospital_id required; optional billing_code, payer_name, plan_name, rate_category, billing_code_type
+        if not hospital_id or not str(hospital_id).strip():
+            return pd.DataFrame()
+        conditions = ["f.hospital_id = @hospital_id"]
+        params = [ScalarQueryParameter("hospital_id", "STRING", str(hospital_id).strip())]
+        if billing_code:
+            conditions.append("f.billing_code = @billing_code")
+            params.append(ScalarQueryParameter("billing_code", "STRING", billing_code))
+        if payer_name:
+            conditions.append("f.payer_name = @payer_name")
+            params.append(ScalarQueryParameter("payer_name", "STRING", payer_name))
+        if plan_name:
+            conditions.append("f.plan_name = @plan_name")
+            params.append(ScalarQueryParameter("plan_name", "STRING", plan_name))
+        if rate_category:
+            conditions.append("f.rate_category = @rate_category")
+            params.append(ScalarQueryParameter("rate_category", "STRING", rate_category))
+        if billing_code_type:
+            conditions.append("COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = @billing_code_type")
+            params.append(ScalarQueryParameter("billing_code_type", "STRING", str(billing_code_type).strip()))
+        where = " AND ".join(conditions)
+        sql = f"""
+        SELECT f.semantic_charge_sk, f.hospital_id,
+               COALESCE(d.hospital_name_clean, f.hospital_name) AS hospital_name_clean,
+               f.billing_code, f.billing_code_type,
+               COALESCE(proc.canonical_description, f.description) AS description,
+               COALESCE(ph.payer_family, f.payer_name) AS payer_family,
+               COALESCE(ph.plan_family, f.plan_name) AS plan_family,
+               f.rate_category, f.rate_amount, f.rate_unit, f.ingested_at
+        FROM {_bq_table('fct_standard_charges_semantic')} f
+        LEFT JOIN {_bq_table('dim_hospital')} d ON f.hospital_id = d.hospital_id
+        LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
+          ON f.billing_code = proc.billing_code AND COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
+        LEFT JOIN {_bq_table('dim_payer_harmonized')} ph
+          ON COALESCE(TRIM(f.payer_name), '') = ph.payer_name_raw AND COALESCE(TRIM(f.plan_name), '') = ph.plan_name_raw
+        WHERE {where}
+        ORDER BY f.rate_amount DESC
+        LIMIT {limit}
+        """
+        job_config = QueryJobConfig(query_parameters=params)
+        return _bq_client().query(sql, job_config=job_config).to_dataframe()
 
 
 @st.cache_data
@@ -265,18 +516,80 @@ def get_hospital_payer_coverage(hospital_id: str, limit: int = 100) -> pd.DataFr
 
 
 def get_hospital_top_procedures(hospital_id: str, limit: int = 50) -> pd.DataFrame:
-    """Top procedures by row count for one hospital from BigQuery."""
+    """Top procedures by row count for one hospital from BigQuery; description = canonical_description."""
     limit = max(1, min(int(limit), 200))
     from google.cloud.bigquery import ScalarQueryParameter
     sql = f"""
-    SELECT billing_code, billing_code_type, description, COUNT(*) AS row_count
-    FROM {_bq_table('fct_standard_charges_semantic')}
-    WHERE hospital_id = @hospital_id
-    GROUP BY billing_code, billing_code_type, description
+    SELECT f.billing_code, f.billing_code_type,
+           COALESCE(h.canonical_description, MAX(f.description)) AS description,
+           COUNT(*) AS row_count
+    FROM {_bq_table('fct_standard_charges_semantic')} f
+    LEFT JOIN {_bq_table('dim_procedure_harmonized')} h
+      ON f.billing_code = h.billing_code AND COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = h.billing_code_type
+    WHERE f.hospital_id = @hospital_id
+    GROUP BY f.billing_code, f.billing_code_type, h.canonical_description
     ORDER BY row_count DESC
     LIMIT {limit}
     """
     return _bq_query(sql, [ScalarQueryParameter("hospital_id", "STRING", hospital_id)])
+
+
+@st.cache_data
+def get_coverage_matrix(_mode: Optional[str] = None) -> pd.DataFrame:
+    """
+    Per-hospital coverage from agg_payer_plan_compare: distinct billing_code, payer_family, plan_family counts
+    and total comparable rows. Joined to dim_hospital for hospital_name_clean. Cached.
+    """
+    sql = f"""
+    SELECT
+      a.hospital_id,
+      COALESCE(ANY_VALUE(d.hospital_name_clean), a.hospital_id) AS hospital_name_clean,
+      COUNT(DISTINCT a.billing_code) AS distinct_billing_codes,
+      COUNT(DISTINCT a.payer_family) AS distinct_payer_family,
+      COUNT(DISTINCT a.plan_family) AS distinct_plan_family,
+      SUM(a.row_count) AS total_comparable_rows
+    FROM {_bq_table('agg_payer_plan_compare')} a
+    LEFT JOIN {_bq_table('dim_hospital')} d ON a.hospital_id = d.hospital_id
+    GROUP BY a.hospital_id
+    ORDER BY total_comparable_rows DESC
+    """
+    return _bq_query(sql)
+
+
+@st.cache_data
+def get_top_procedure_variants(limit: int = 50, _mode: Optional[str] = None) -> pd.DataFrame:
+    """
+    Top procedure codes by description_variants_count from dim_procedure_harmonized. Cached.
+    """
+    limit = max(1, min(int(limit), 500))
+    sql = f"""
+    SELECT billing_code, billing_code_type, canonical_description, description_variants_count
+    FROM {_bq_table('dim_procedure_harmonized')}
+    WHERE description_variants_count > 0
+    ORDER BY description_variants_count DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql)
+
+
+@st.cache_data
+def get_payer_family_variant_counts(limit: int = 50, _mode: Optional[str] = None) -> pd.DataFrame:
+    """
+    Payer_family with count of distinct payer_name_norm mapping to it (from dim_payer_harmonized).
+    High count = mapping opportunity (many raw names map to one family). Cached.
+    """
+    limit = max(1, min(int(limit), 200))
+    sql = f"""
+    SELECT
+      payer_family,
+      COUNT(DISTINCT payer_name_norm) AS payer_name_norm_count
+    FROM {_bq_table('dim_payer_harmonized')}
+    GROUP BY payer_family
+    HAVING COUNT(DISTINCT payer_name_norm) > 1
+    ORDER BY payer_name_norm_count DESC
+    LIMIT {limit}
+    """
+    return _bq_query(sql)
 
 
 @st.cache_data
@@ -313,12 +626,18 @@ def get_data_quality_metrics(_mode: Optional[str] = None) -> dict:
 
 
 def get_outlier_rates(limit: int = 100) -> pd.DataFrame:
-    """Top rate_amount rows (outliers) from BigQuery. Capped query."""
+    """Top rate_amount rows (outliers) from BigQuery. Capped query. Uses hospital_name_clean and canonical_description for display."""
     limit = max(1, min(int(limit), 500))
     sql = f"""
-    SELECT hospital_id, hospital_name, billing_code, description, rate_category, rate_amount, payer_name, plan_name
-    FROM {_bq_table('fct_standard_charges_semantic')}
-    ORDER BY rate_amount DESC
+    SELECT f.hospital_id, COALESCE(d.hospital_name_clean, f.hospital_name) AS hospital_name,
+           f.billing_code,
+           COALESCE(h.canonical_description, f.description) AS description,
+           f.rate_category, f.rate_amount, f.payer_name, f.plan_name
+    FROM {_bq_table('fct_standard_charges_semantic')} f
+    LEFT JOIN {_bq_table('dim_hospital')} d ON f.hospital_id = d.hospital_id
+    LEFT JOIN {_bq_table('dim_procedure_harmonized')} h
+      ON f.billing_code = h.billing_code AND COALESCE(CAST(f.billing_code_type AS STRING), 'UNKNOWN') = h.billing_code_type
+    ORDER BY f.rate_amount DESC
     LIMIT {limit}
     """
     return _bq_query(sql)

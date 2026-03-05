@@ -18,6 +18,12 @@ clean-targets: ["target", "dbt_packages"]
 vars:
   execution_mode: "bq"
   silver_parquet_glob: "lake/silver/standard_charges/**/*.parquet"
+  # Comparable categories (is_comparable = TRUE); excludes 'other'. accepted_rate_categories in model includes 'other'.
+  comparable_rate_categories: ["negotiated", "gross", "cash", "min", "max", "percentage"]
+
+seeds:
+  kc_hospital_price_transparency:
+    +schema: marts
 
 models:
   kc_hospital_price_transparency:
@@ -27,7 +33,8 @@ models:
     staging:
       +materialized: view
       +schema: staging
-    staging.local:
+    # Path for models/staging/local/ (dot notation so dbt applies config and does not warn "unused")
+    "staging.local":
       +materialized: view
       +schema: staging
     intermediate:

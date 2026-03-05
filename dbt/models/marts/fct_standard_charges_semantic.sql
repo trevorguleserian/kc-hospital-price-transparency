@@ -36,7 +36,7 @@ mapped as (
     b.source_system,
     b.source_file_name,
     b.ingested_at,
-    cast(null as varchar) as contracting_method
+    cast(null as string) as contracting_method
   from b
   where b.rate_amount is not null and try_cast(b.rate_amount as double) is not null and try_cast(b.rate_amount as double) != 0
 )

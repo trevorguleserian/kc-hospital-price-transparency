@@ -446,9 +446,14 @@ def main() -> None:
                     hc = len(hdrs)
                     fh = "WIDE" if hc >= WIDE_MIN_COLS else "TALL"
                     pkv = {}
-                    for i in range(0, len(r1) - 1, 2):
-                        if r1[i].strip():
-                            pkv[r1[i]] = r1[i + 1]
+                    if r2 and len(r2) >= len(r1):
+                        for i in range(len(r1)):
+                            if r1[i].strip():
+                                pkv[r1[i].strip()] = r2[i] if i < len(r2) else ""
+                    else:
+                        for i in range(0, len(r1) - 1, 2):
+                            if r1[i].strip():
+                                pkv[r1[i].strip()] = r1[i + 1]
                     _append_csv_registry_row(
                         client, run_id, source_file_name, ingested_at,
                         fh, hc, delim, enc, json.dumps(r1), json.dumps(r2), pkv,

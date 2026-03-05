@@ -25,8 +25,11 @@ if hospitals_df.empty:
     st.warning("No hospitals in data.")
     st.stop()
 
-if "hospital_id" in hospitals_df.columns and "hospital_name" in hospitals_df.columns:
-    opts = hospitals_df[["hospital_id", "hospital_name"]].drop_duplicates()
+if "hospital_id" in hospitals_df.columns:
+    display_col = "hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name"
+    if display_col not in hospitals_df.columns:
+        display_col = hospitals_df.columns[1] if len(hospitals_df.columns) > 1 else hospitals_df.columns[0]
+    opts = hospitals_df[["hospital_id", display_col]].drop_duplicates()
     hospital_options = list(opts.itertuples(index=False, name=None))
     hospital_labels = [f"{h[1]} ({h[0]})" for h in hospital_options]
     hospital_ids = [h[0] for h in hospital_options]

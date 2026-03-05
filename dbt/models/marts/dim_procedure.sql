@@ -14,6 +14,6 @@ with unioned as (
 
 select
   coalesce(billing_code, '') as billing_code,
-  {{ infer_billing_code_type_if_unknown('billing_code', 'billing_code_type') }} as billing_code_type,
+  upper(replace(trim(cast({{ infer_billing_code_type_if_unknown('billing_code', 'billing_code_type') }} as string)), '-', '_')) as billing_code_type,
   description
 from unioned

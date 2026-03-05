@@ -33,18 +33,60 @@ models:
         description: "Plan name."
     tests: []
 
+  - name: dim_payer_harmonized
+    description: "Payer/plan with normalized names and seed-mapped payer_family, plan_family for comparison."
+    columns:
+      - name: payer_name_norm
+        description: "Normalized payer name (upper, trim, punctuation to space, collapse spaces, no bracket codes)."
+        tests:
+          - not_null
+      - name: plan_name_norm
+        description: "Normalized plan name (same normalization)."
+        tests:
+          - not_null
+      - name: payer_family
+        description: "Harmonized payer from seed_payer_map or payer_name_norm."
+        tests:
+          - not_null
+      - name: plan_family
+        description: "Harmonized plan from seed_plan_map or plan_name_norm."
+        tests:
+          - not_null
+    tests: []
+
   - name: dim_procedure
     description: "Distinct billing_code, billing_code_type, description from union. billing_code_type inferred from code when source is UNKNOWN."
     columns:
       - name: billing_code
         description: "CPT/HCPCS/DRG or other code."
       - name: billing_code_type
-        description: "Code type or system (CPT, HCPCS, NDC, REVENUE, ICD-10-PCS, or UNKNOWN)."
+        description: "Code type or system; standardized to UPPER and hyphens replaced with underscores (e.g. ICD_10_PCS, MS_DRG)."
         tests:
+          # Diagnostic: run dbt run --select diag_dim_procedure_billing_code_type_unexpected and add any returned values here.
           - accepted_values:
-              values: ['CPT', 'HCPCS', 'NDC', 'REVENUE', 'ICD-10-PCS', 'UNKNOWN']
+              arguments:
+                values: ['CPT', 'HCPCS', 'NDC', 'REVENUE', 'ICD_10_PCS', 'UNKNOWN', 'DRG', 'MS_DRG', 'APC', 'EAPG', 'ICD_10_CM', 'RC', 'CDM', '8', 'APR_DRG', 'ICD', 'TRIS_DRG', 'HIPPS']
       - name: description
         description: "Procedure or service description."
+    tests: []
+
+  - name: dim_procedure_harmonized
+    description: "One row per (billing_code, billing_code_type) with canonical_description = most frequent non-null description across hospitals and description_variants_count."
+    columns:
+      - name: billing_code
+        description: "CPT/HCPCS/DRG or other code."
+        tests:
+          - not_null
+      - name: billing_code_type
+        description: "Code type or system (CPT, HCPCS, NDC, REVENUE, ICD-10-PCS, or UNKNOWN)."
+        tests:
+          - not_null
+      - name: canonical_description
+        description: "Most frequent non-null description for this (billing_code, billing_code_type); fallback to dim_procedure or '(no description)'."
+        tests:
+          - not_null
+      - name: description_variants_count
+        description: "Count of distinct descriptions seen for this (billing_code, billing_code_type)."
     tests: []
 
   - name: fct_standard_charges
@@ -88,15 +130,17 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('dim_hospital')
-              field: hospital_id
+              arguments:
+                to: ref('dim_hospital')
+                field: hospital_id
       - name: billing_code
         description: "Procedure/service code; join to dim_procedure."
         tests:
           - not_null
           - relationships:
-              to: ref('dim_procedure')
-              field: billing_code
+              arguments:
+                to: ref('dim_procedure')
+                field: billing_code
       - name: rate_category
         description: "Canonical category: negotiated, gross, cash, min, max, percentage, other."
         tests:
@@ -115,6 +159,93 @@ models:
           - accepted_values:
               arguments:
                 values: ['json', 'csv_tall', 'csv_wide']
+    tests: []
+
+  - name: fct_rates_comparable
+    description: "All semantic rows with non-null rate_category and numeric rate_amount. rate_category normalized. is_comparable = FALSE for 'other'; comparison aggs filter to is_comparable = TRUE."
+    columns:
+      - name: hospital_id
+        description: "Hospital identifier; join to dim_hospital."
+        tests:
+          - not_null
+      - name: billing_code
+        description: "Procedure/service code; join to dim_procedure."
+        tests:
+          - not_null
+      - name: rate_category
+        description: "Normalized (LOWER(TRIM)); accepted values include 'other' (kept for diagnostics, is_comparable = FALSE)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['negotiated', 'gross', 'cash', 'min', 'max', 'percentage', 'other']
+      - name: rate_amount
+        description: "Numeric rate; only non-null, non-zero included."
+        tests:
+          - not_null
+      - name: is_comparable
+        description: "TRUE only for categories used in hospital/payer comparisons (excludes 'other')."
+        tests:
+          - not_null
+      - name: comparability_reason
+        description: "Why comparable or not: ALLOWLIST_AND_HAS_UNIT, ALLOWLIST_UNIT_MISSING_BUT_ALLOWED, category_not_allowed, missing_rate_unit, etc."
+        tests:
+          - not_null
+      - name: comparability_key
+        description: "Deterministic key for like-to-like: billing_code_type|rate_category|rate_unit."
+        tests:
+          - not_null
+    tests: []
+
+  - name: fct_rates_comparable_harmonized
+    description: "fct_rates_comparable plus payer_family, plan_family from dim_payer_harmonized."
+    columns: []
+    tests: []
+
+  - name: agg_hospital_procedure_compare
+    description: "Hospital-to-hospital comparison: one row per (billing_code, billing_code_type, payer_family, plan_family, rate_category, rate_unit, comparability_key, hospital_id) with min/max/approx_median rate, row_count, last_ingested_at."
+    columns:
+      - name: billing_code
+        description: "Procedure/service code."
+        tests:
+          - not_null
+      - name: hospital_id
+        description: "Hospital identifier."
+        tests:
+          - not_null
+      - name: rate_category
+        description: "Canonical rate category (negotiated, gross, cash, etc.)."
+        tests:
+          - not_null
+      - name: approx_median_rate
+        description: "Approximate median rate_amount (BigQuery APPROX_QUANTILES(rate_amount, 100)[OFFSET(50)])."
+        tests:
+          - not_null
+    tests: []
+
+  - name: agg_payer_plan_compare
+    description: "Payer/plan comparison: same grain as agg_hospital_procedure_compare; used to aggregate by payer_family or plan_family with filters."
+    columns:
+      - name: billing_code
+        description: "Procedure/service code."
+        tests:
+          - not_null
+      - name: payer_family
+        description: "Harmonized payer from dim_payer_harmonized."
+        tests:
+          - not_null
+      - name: plan_family
+        description: "Harmonized plan from dim_payer_harmonized."
+        tests:
+          - not_null
+      - name: rate_category
+        description: "Canonical rate category."
+        tests:
+          - not_null
+      - name: hospital_id
+        description: "Hospital identifier."
+        tests:
+          - not_null
     tests: []
 
   - name: dim_source_file

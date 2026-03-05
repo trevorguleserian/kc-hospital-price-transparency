@@ -4,7 +4,7 @@
   REVENUE = 3-4 digits (and not CPT). Order: more specific first. Adapter-agnostic.
 #}
 {% macro classify_billing_code_type(billing_code_expr) %}
-  {% set code = "trim(coalesce(cast(" ~ billing_code_expr ~ " as varchar), ''))" %}
+  {% set code = "trim(coalesce(cast(" ~ billing_code_expr ~ " as string), ''))" %}
   {% set code_clean = "replace(replace(" ~ code ~ ", '-', ''), ' ', '')" %}
   case
     when regexp_replace({{ code_clean }}, '^[0-9]{5}$', '') = '' then 'CPT'
@@ -23,7 +23,7 @@
 #}
 {% macro infer_billing_code_type_if_unknown(billing_code_expr, existing_type_expr) %}
   case
-    when lower(trim(coalesce(cast({{ existing_type_expr }} as varchar), ''))) in ('unknown', '') then {{ classify_billing_code_type(billing_code_expr) }}
-    else trim(coalesce(cast({{ existing_type_expr }} as varchar), ''))
+    when lower(trim(coalesce(cast({{ existing_type_expr }} as string), ''))) in ('unknown', '') then {{ classify_billing_code_type(billing_code_expr) }}
+    else trim(coalesce(cast({{ existing_type_expr }} as string), ''))
   end
 {% endmacro %}

@@ -92,6 +92,39 @@ For your own hospital files:
 
 ---
 
+## First-run (dbt) setup
+
+Use this order from the **`dbt/`** directory so packages, connection, seeds, models, and tests all run correctly.
+
+**Required order:**
+
+```powershell
+cd dbt
+dbt deps
+dbt debug
+dbt seed
+dbt run
+dbt test
+```
+
+- **`dbt deps`** — Installs packages from `packages.yml` into `dbt_packages/`. Required before compile/run/test if that folder is missing.
+- **`dbt debug`** — Checks profile and project. Fix any errors before continuing.
+- **`dbt seed`** — Loads seeds (e.g. payer/plan maps) into the configured dataset (e.g. `pt_analytics_marts` on BigQuery).
+- **`dbt run`** — Builds models.
+- **`dbt test`** — Runs data tests.
+
+**If you run `dbt clean`:** The `clean-targets` in `dbt_project.yml` include `dbt_packages`, so `dbt clean` removes installed packages. You must run **`dbt deps`** again before `dbt compile`, `dbt run`, or `dbt test`.
+
+**Optional (run only marts and guardrail tests):**
+
+```powershell
+dbt run --select agg_hospital_procedure_compare agg_payer_plan_compare
+dbt test --select no_other_in_agg_hospital_procedure_compare no_other_in_agg_payer_plan_compare
+```
+**BigQuery dataset expectations:** With the default profile, staging/intermediate/marts write to the profile’s dataset (often `pt_analytics_marts`). Seeds also go to that dataset (`seed_payer_map`, `seed_plan_map`). Ensure the dataset exists or dbt can create it.
+
+---
+
 ## Run Streamlit locally
 
 From the repo root (after generating exports via Quickstart or full run):
@@ -183,6 +216,10 @@ To diagnose why BigQuery is not configured or not working on Streamlit Community
 | Streamlit "BigQuery unavailable" | Set credentials or use **Local** in the sidebar. |
 
 **Full runbook:** [docs/runbook.md](docs/runbook.md)
+
+### Known warnings
+
+- **RequestsDependencyWarning (urllib3 version):** You may see a warning that `urllib3` (e.g. 2.6.3) doesn’t match a supported version. This comes from the `requests`/`urllib3` stack used by dbt or the BigQuery client. It is safe to ignore for normal runs. To try to align versions, pin in your environment (e.g. `urllib3<2.7` in `requirements.txt` or a constraints file); only do this if you need to satisfy a strict policy, as it can conflict with other packages.
 
 ---
 
