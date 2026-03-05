@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from typing import Optional, Tuple
 
 import streamlit as st
@@ -58,13 +59,13 @@ def get_bq_config() -> Tuple[str, str, str, str]:
 
 
 def _get_service_account_from_secrets() -> Optional[dict]:
-    """Return service account dict from st.secrets['gcp_service_account'] or None."""
+    """Return service account as a plain dict from st.secrets['gcp_service_account'] or None. Accepts Mapping (e.g. AttrDict)."""
     try:
         raw = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
         if raw is None:
             return None
-        if isinstance(raw, dict):
-            return raw
+        if isinstance(raw, Mapping):
+            return dict(raw)
         s = str(raw).strip()
         if not s:
             return None
@@ -107,7 +108,7 @@ def get_bq_client() -> Tuple[Optional[object], Optional[str]]:
 
     if sa is not None:
         if not isinstance(sa, dict) or sa.get("type") != "service_account":
-            return _err("BigQuery secrets: gcp_service_account must be a service account JSON object (dict).")
+            return _err("BigQuery secrets: gcp_service_account must be a service account object (mapping with type, project_id, private_key_id, private_key, client_email).")
         try:
             creds = service_account.Credentials.from_service_account_info(sa)
             proj = project_id or (sa.get("project_id") or "")

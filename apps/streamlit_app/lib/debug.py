@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
 from typing import Tuple
 
 import streamlit as st
@@ -36,17 +37,19 @@ def _get_gcp_sa_raw():
 
 
 def get_gcp_sa_type() -> str:
-    """Return type of gcp_service_account value for display (e.g. 'dict', 'str'). No secret values."""
+    """Return type of gcp_service_account value for display (e.g. 'dict', 'AttrDict'). No secret values."""
     raw = _get_gcp_sa_raw()
     if raw is None:
         return "missing"
+    if isinstance(raw, Mapping):
+        return raw.__class__.__name__
     return type(raw).__name__
 
 
 def get_gcp_sa_key_names() -> list[str]:
-    """Return list of key names inside gcp_service_account if it is a dict; else []. No values."""
+    """Return list of key names inside gcp_service_account if it is a mapping; else []. No values."""
     raw = _get_gcp_sa_raw()
-    if not isinstance(raw, dict):
+    if not isinstance(raw, Mapping):
         return []
     return sorted(raw.keys())
 
@@ -60,7 +63,7 @@ def has_bq_secrets() -> tuple[bool, list[str]]:
     """
     Check presence of required BigQuery secrets (key names only).
     Returns (True, []) if all present and valid, else (False, missing_items).
-    missing_items: top-level keys, or "gcp_service_account (not a table/dict; got <type>)", or "gcp_service_account.<field>" for missing/empty subfields.
+    missing_items: top-level keys, or "gcp_service_account (not a mapping; got <type>)", or "gcp_service_account.<field>" for missing/empty subfields.
     """
     keys = _safe_secrets_keys()
     missing: list[str] = []
@@ -77,11 +80,12 @@ def has_bq_secrets() -> tuple[bool, list[str]]:
             raw = _get_gcp_sa_raw()
             if raw is None:
                 missing.append("gcp_service_account")
-            elif not isinstance(raw, dict):
-                missing.append(f"gcp_service_account (not a table/dict; got {type(raw).__name__})")
+            elif not isinstance(raw, Mapping):
+                missing.append(f"gcp_service_account (not a mapping; got {type(raw).__name__})")
             else:
+                sa_keys = list(raw.keys())
                 for f in GCP_SA_REQUIRED_FIELDS:
-                    if f not in raw:
+                    if f not in sa_keys:
                         missing.append(f"gcp_service_account.{f}")
                     elif _is_empty_value(raw[f]):
                         missing.append(f"gcp_service_account.{f}")
@@ -138,11 +142,11 @@ def validate_bq_secrets() -> Tuple[bool, str]:
     gcp_sa_field_names: list[str] = []
     if has_gcp_sa:
         try:
-            raw = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
-            if isinstance(raw, dict):
+            raw = _get_gcp_sa_raw()
+            if isinstance(raw, Mapping):
                 gcp_sa_field_names = list(raw.keys())
             elif raw is not None:
-                gcp_sa_field_names = ["(value is not a dict)"]
+                gcp_sa_field_names = ["(value is not a mapping)"]
         except Exception:
             gcp_sa_field_names = ["(error reading keys)"]
 
@@ -202,8 +206,8 @@ def bq_secrets_error_message() -> str:
         "",
         "gcp_service_account value type: " + sa_type,
     ]
-    if sa_type == "dict":
-        sa_keys = get_gcp_sa_key_names()
+    sa_keys = get_gcp_sa_key_names()
+    if sa_keys:
         lines.append("gcp_service_account keys (names only): " + ", ".join(sa_keys))
     return "\n".join(lines)
 
@@ -218,8 +222,9 @@ def require_bq_secrets_or_stop() -> None:
     st.text("Present secrets keys: " + (", ".join(secrets_keys()) if secrets_keys() else "(none)"))
     st.text("Missing items: " + ", ".join(missing))
     st.text("gcp_service_account value type: " + get_gcp_sa_type())
-    if get_gcp_sa_type() == "dict":
-        st.text("gcp_service_account keys (names only): " + ", ".join(get_gcp_sa_key_names()))
+    sa_key_names = get_gcp_sa_key_names()
+    if sa_key_names:
+        st.text("gcp_service_account keys (names only): " + ", ".join(sa_key_names))
     with st.expander("Expected TOML structure (keys only)"):
         st.code(
             "BQ_PROJECT = \"your-project\"\n"
@@ -249,11 +254,11 @@ def render_debug_panel() -> None:
                 st.text(f"gcp_service_account present: {'gcp_service_account' in keys}")
                 if "gcp_service_account" in keys:
                     try:
-                        raw = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else getattr(st.secrets, "gcp_service_account", None)
-                        if isinstance(raw, dict):
+                        raw = _get_gcp_sa_raw()
+                        if isinstance(raw, Mapping):
                             st.text(f"gcp_service_account fields (names only): {sorted(raw.keys())}")
                         else:
-                            st.text("gcp_service_account: (not a dict)")
+                            st.text("gcp_service_account: (not a mapping)")
                     except Exception as ex:
                         st.text(f"gcp_service_account: (error: {type(ex).__name__})")
                 ok_validate, msg_validate = validate_bq_secrets()
