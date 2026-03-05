@@ -43,6 +43,9 @@ incoming/
 # Allow small sample data for quickstart (must stay under data/sample/)
 !data/sample/
 !data/sample/**
+# Allow dbt seed CSVs so CI can run dbt parse (dim_payer_harmonized refs seed_payer_map, seed_plan_map)
+!dbt/seeds/
+!dbt/seeds/*.csv
 
 # =============================================================================
 # Python

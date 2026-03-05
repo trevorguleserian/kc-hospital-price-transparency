@@ -1,0 +1,8 @@
+payer_family,plan_name_norm,plan_family
+BCBS,PPO,PPO
+BCBS,HMO,HMO
+United,CHOICE,Choice
+United,SELECT,Select
+Aetna,PPO,PPO
+Medicare,MEDICARE FEE FOR SERVICE,Medicare FFS
+Medicare,TRADITIONAL,Medicare FFS
