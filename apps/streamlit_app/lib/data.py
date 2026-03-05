@@ -55,9 +55,10 @@ def _bq_project() -> str:
 
 
 def _bq_dataset() -> str:
+    """Marts dataset for BigQuery (dim_*, fct_*). Default pt_analytics_marts."""
     from lib import bq_auth
-    _project, dataset, _loc, _ = bq_auth.get_bq_config()
-    return dataset or os.environ.get("BQ_DATASET", "pt_analytics_marts").strip()
+    _project, dataset_marts, _loc, _ = bq_auth.get_bq_config()
+    return dataset_marts or os.environ.get("BQ_DATASET_MARTS") or os.environ.get("BQ_DATASET") or "pt_analytics_marts"
 
 
 def _bq_table(table: str) -> str:
@@ -471,7 +472,7 @@ def ensure_data_available() -> tuple[bool, str]:
             return False, err or "BigQuery not configured."
         project_id, dataset, _loc, _ = bq_auth.get_bq_config()
         if not project_id or not dataset:
-            return False, "BigQuery not configured: set bq.project and bq.dataset in Streamlit secrets or env BQ_PROJECT, BQ_DATASET."
+            return False, "BigQuery not configured: set BQ_PROJECT and BQ_DATASET_MARTS in Streamlit secrets or env."
         try:
             sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
             client.query(sql).result()

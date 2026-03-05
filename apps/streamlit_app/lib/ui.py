@@ -1,5 +1,7 @@
 """Shared UI components for Streamlit MVP."""
 import os
+from typing import Optional
+
 import streamlit as st
 
 from . import data
@@ -10,11 +12,26 @@ DEMO_PROCEDURE_QUERY = "99213"
 DEMO_RESULTS_LIMIT = 500
 
 
+@st.cache_data(ttl=120)
+def _cached_fct_semantic_count(project_id: str, dataset: str) -> tuple[bool, str, Optional[int]]:
+    """Run SELECT COUNT(1) on fct_standard_charges_semantic; cached so sidebar is not slow."""
+    from . import bq_auth
+    client, err = bq_auth.get_bq_client()
+    if err or not client:
+        return False, err or "No BigQuery client", None
+    try:
+        job = client.query(f"SELECT COUNT(1) AS n FROM `{project_id}.{dataset}.fct_standard_charges_semantic`")
+        row = next(job.result(), None)
+        return True, "OK", int(row["n"]) if row else 0
+    except Exception as e:
+        return False, str(e).strip() or "Query failed", None
+
+
 def _bigquery_instructions():
     return """
-**To enable BigQuery (Streamlit Cloud):** In app settings → Secrets, paste the exact TOML block from the README "Streamlit Cloud" section. Required keys: `gcp_service_account`, `[bq]` with `project` and `dataset`.
+**Streamlit Cloud:** Use Secrets with keys from README **Streamlit Cloud → BigQuery setup**: `gcp_service_account`, `BQ_PROJECT`, `BQ_DATASET_MARTS`, `BQ_LOCATION` (optional).
 
-**Local:** Set `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON path, and `BQ_PROJECT`, `BQ_DATASET`.
+**Local:** Set `GOOGLE_APPLICATION_CREDENTIALS` and env `BQ_PROJECT`, `BQ_DATASET_MARTS` (default `pt_analytics_marts`).
 """
 
 
@@ -52,7 +69,7 @@ def render_sidebar():
                 if err or client is None:
                     st.error(err or "BigQuery client failed. Using Local (demo).")
                     with st.expander("Required secrets (exact keys)", expanded=True):
-                        st.code("\n".join(bq_auth.REQUIRED_SECRETS_KEYS), language="toml")
+                        st.code("\n".join(bq_auth.REQUIRED_SECRETS_KEYS), language="text")
                     st.session_state["app_data_source"] = "local"
                     st.rerun()
 
@@ -66,20 +83,21 @@ def render_sidebar():
         else:
             st.success("Data available")
 
-        # BigQuery status, smoke query (dim_hospital), and marts check when in BigQuery mode
+        # BigQuery diagnostic panel (resolved config + cached COUNT(1) on fct_standard_charges_semantic)
         if data.get_mode() == "bigquery":
             project_id, dataset, location, creds_source = bq_auth.get_bq_config()
             with st.expander("BigQuery status"):
                 st.text(f"Project: {project_id}")
-                st.text(f"Dataset: {dataset}")
+                st.text(f"Dataset (marts): {dataset}")
                 st.text(f"Location: {location}")
                 st.text(f"Credentials: {creds_source}")
                 ok_smoke, msg_smoke, dim_count = bq_auth.smoke_query_dim_hospital()
                 if ok_smoke and dim_count is not None:
                     st.success(f"dim_hospital: {dim_count:,} rows")
                 elif not ok_smoke:
-                    st.error(f"Smoke query (dim_hospital): {msg_smoke}")
-                ok_marts, msg_marts, marts_count = bq_auth.verify_bigquery_marts()
+                    st.error(f"Smoke (dim_hospital): {msg_smoke}")
+                # Cached COUNT(1) so sidebar is not slow
+                ok_marts, msg_marts, marts_count = _cached_fct_semantic_count(project_id, dataset)
                 if ok_marts and marts_count is not None:
                     st.success(f"fct_standard_charges_semantic: {marts_count:,} rows")
                 elif not ok_marts:

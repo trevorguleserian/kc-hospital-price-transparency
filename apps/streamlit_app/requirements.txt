@@ -2,6 +2,7 @@ streamlit
 pandas
 pyarrow
 google-cloud-bigquery
+google-auth
 python-dotenv
 dbt-core
 dbt-duckdb
