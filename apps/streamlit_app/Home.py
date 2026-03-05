@@ -5,9 +5,12 @@ Run from repo root: streamlit run apps/streamlit_app/Home.py
 import streamlit as st
 
 from lib import data, ui
+from lib import debug
 
 st.set_page_config(page_title="Price Transparency — Overview", page_icon="🏥", layout="wide")
 ui.render_sidebar()
+if debug.is_debug_enabled():
+    debug.render_debug_panel()
 
 st.title("Hospital Price Transparency")
 st.caption("Overview")

@@ -73,10 +73,26 @@ def _get_service_account_from_secrets() -> Optional[dict]:
         return None
 
 
+def get_bq_missing_key_names() -> list[str]:
+    """Return list of missing secret/key names only (no values). For error messages."""
+    missing = []
+    sa = _get_service_account_from_secrets()
+    if sa is None and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        missing.append("gcp_service_account")
+    project = (_secret("BQ_PROJECT") or os.environ.get("BQ_PROJECT") or "").strip()
+    if not project:
+        missing.append("BQ_PROJECT")
+    dataset = (_secret("BQ_DATASET_MARTS") or os.environ.get("BQ_DATASET_MARTS") or "").strip()
+    if not dataset:
+        missing.append("BQ_DATASET_MARTS")
+    return missing
+
+
 def get_bq_client() -> Tuple[Optional[object], Optional[str]]:
     """
     Return (client, None) on success or (None, error_message) on failure.
     Uses Credentials.from_service_account_info when gcp_service_account is in secrets; else ADC.
+    Error message includes missing key names only (no secret values) and suggests mode.
     """
     from google.cloud import bigquery
     from google.oauth2 import service_account
@@ -84,31 +100,37 @@ def get_bq_client() -> Tuple[Optional[object], Optional[str]]:
     project_id, dataset_marts, location, _ = get_bq_config()
     sa = _get_service_account_from_secrets()
 
+    def _err(msg: str) -> Tuple[Optional[object], Optional[str]]:
+        missing = get_bq_missing_key_names()
+        suffix = f" Missing keys (names only): {missing}." if missing else ""
+        return None, f"{msg}{suffix} (Mode: bigquery)"
+
     if sa is not None:
         if not isinstance(sa, dict) or sa.get("type") != "service_account":
-            return None, "BigQuery secrets: gcp_service_account must be a service account JSON object (dict)."
+            return _err("BigQuery secrets: gcp_service_account must be a service account JSON object (dict).")
         try:
             creds = service_account.Credentials.from_service_account_info(sa)
-            # Prefer project from secrets/env; fall back to project_id in the service account
             proj = project_id or (sa.get("project_id") or "")
             if not proj:
-                return None, "BigQuery: set BQ_PROJECT in secrets or env, or use a service account JSON that includes project_id."
+                return _err("BigQuery: set BQ_PROJECT in secrets or env, or use a service account JSON that includes project_id.")
             client = bigquery.Client(credentials=creds, project=proj, location=location or None)
             return client, None
         except Exception as e:
-            return None, f"BigQuery credentials failed: {e}"
+            return None, f"BigQuery credentials failed: {e}. Missing keys (names only): {get_bq_missing_key_names()} (Mode: bigquery)"
 
     try:
         client = bigquery.Client(project=project_id or None, location=location or None)
         return client, None
     except Exception as e:
         err = str(e).strip() or "Unknown BigQuery client error"
-        return None, (
+        missing = get_bq_missing_key_names()
+        base = (
             "BigQuery not configured. Add Streamlit secrets: gcp_service_account, BQ_PROJECT, BQ_DATASET_MARTS (and optionally BQ_LOCATION). "
             "Or locally set GOOGLE_APPLICATION_CREDENTIALS and BQ_PROJECT, BQ_DATASET_MARTS."
             if ("project" in err.lower() or "GOOGLE_APPLICATION_CREDENTIALS" in err)
             else f"BigQuery: {err}"
         )
+        return None, f"{base} Missing keys (names only): {missing}. (Mode: bigquery)"
 
 
 def validate_bigquery_secrets() -> Tuple[bool, str]:

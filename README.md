@@ -150,6 +150,14 @@ BigQuery mode on Streamlit Community Cloud uses **Streamlit Secrets** only (no l
 - If **SAMPLE_DATA=1** and exports are missing, the app auto-generates them from `data/sample/` at startup (Bronze → Silver → dbt → export). So Local works on Cloud without BigQuery when `SAMPLE_DATA=1`.
 - Unless BigQuery is configured and selected, the app uses Local (demo) or sample data.
 
+### Debug panel (Streamlit Cloud)
+
+To diagnose why BigQuery is not configured or not working on Streamlit Community Cloud, enable the safe debug panel:
+
+- In **Settings → Secrets**, add: **`DEBUG = "1"`** (or set env **`DEBUG=1`** in app settings).
+- The sidebar will show a **Debug (no secrets)** expander with: which secret keys exist, whether `gcp_service_account` is present, its field names only (no values), BigQuery client creation success/failure, and a simple `SELECT 1` smoke test result.
+- **Never paste private keys, tokens, or secret values** into issues, logs, or screenshots. The debug panel does not display any secret values.
+
 ---
 
 ## Security note

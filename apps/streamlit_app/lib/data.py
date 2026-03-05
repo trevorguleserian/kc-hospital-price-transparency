@@ -466,19 +466,19 @@ def ensure_data_available() -> tuple[bool, str]:
         from lib import bq_auth
         ok_validation, validation_msg = bq_auth.validate_bigquery_secrets()
         if not ok_validation:
-            return False, validation_msg
+            return False, f"{validation_msg} [Mode: bigquery]"
         client, err = bq_auth.get_bq_client()
         if err or client is None:
-            return False, err or "BigQuery not configured."
+            return False, err or "BigQuery not configured. [Mode: bigquery]"
         project_id, dataset, _loc, _ = bq_auth.get_bq_config()
         if not project_id or not dataset:
-            return False, "BigQuery not configured: set BQ_PROJECT and BQ_DATASET_MARTS in Streamlit secrets or env."
+            return False, "BigQuery not configured: set BQ_PROJECT and BQ_DATASET_MARTS in Streamlit secrets or env. [Mode: bigquery]"
         try:
             sql = f"SELECT 1 FROM {_bq_table('dim_hospital')} LIMIT 1"
             client.query(sql).result()
             return True, ""
         except Exception as e:
-            return False, f"BigQuery unavailable: {e}"
+            return False, f"BigQuery unavailable: {e} [Mode: bigquery]"
     export_dir = _local_export_dir()
     required = ["dim_hospital", "fct_standard_charges_semantic"]
     missing = [t for t in required if not (export_dir / f"{t}.parquet").exists() and not (export_dir / f"{t}.csv").exists()]
