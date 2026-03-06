@@ -1,249 +1,313 @@
-# KC Hospital Price Transparency Lakehouse (Bronze/Silver/Gold) + dbt + Streamlit
+# KC Hospital Price Transparency
 
-Analytics pipeline and Streamlit MVP for hospital price transparency data: ingest raw charge files (CSV/JSON), normalize in a **lakehouse (Bronze → Silver Parquet)**, transform with **dbt** into a star schema (DuckDB locally or BigQuery), and serve **Streamlit** search, comparison, and data-quality views. Runs locally with **sample data** (no credentials) or with your own raw files; optional BigQuery for production.
-
----
-
-## Architecture
-
-**Raw → Bronze (Parquet) → Silver (standardized + quarantine) → dbt Gold (star schema) → Streamlit.**
-
-| Stage     | Purpose                    | Output |
-|----------|----------------------------|--------|
-| **Bronze** | Ingest raw CSV/JSON as-is; idempotent by file hash | `lake/bronze/pt_csv/`, `lake/bronze/pt_json/` |
-| **Silver** | One row per rate; canonical columns; invalid rows to quarantine | `lake/silver/standard_charges/`, `lake/silver/quarantine/` |
-| **dbt Gold** | Staging → intermediate → marts (star schema) | `fct_standard_charges_semantic`, `dim_hospital`, `dim_payer`, `dim_procedure` (DuckDB or BigQuery) |
-| **Streamlit** | Search, compare, DQ views  | Reads `dbt/exports/` (local) or BigQuery marts |
-
-**Diagram and design choices:** [docs/architecture.md](docs/architecture.md)
+Analytics pipeline and dashboard for **CMS Hospital Price Transparency** data. The project ingests raw standard-charge files (CSV and JSON), normalizes and models them with **dbt** in **BigQuery**, and serves a **Streamlit** app for exploratory analytics and like-to-like comparison of reported hospital standard charges across facilities and payers.
 
 ---
 
-## Project highlights
+## Project Overview
 
-- **Bronze → Silver Parquet:** Raw CSV/JSON landed as Parquet; Silver standardizes to one row per rate with canonical columns and quarantines invalid rows (reason codes).
-- **dbt marts + tests:** Star schema (semantic fact + dims); not_null, relationships, accepted_values, and a warn-only test for UNKNOWN billing_code_type proportion.
-- **Semantic fact:** `fct_standard_charges_semantic` normalizes rate categories (negotiated, gross, cash, min, max, etc.) and filters null `billing_code` for BI-safe joins.
-- **Preflight audit:** `scripts/preflight_repo_audit.ps1` / `.sh` fails if forbidden paths (raw_drop, lake, etc.) or secrets-like files are tracked, or any file &gt; 95MB.
-- **Force re-ingest + header detection:** CSV header auto-detection (many hospital files use row 3); force re-ingest script to reprocess when the wrong header was chosen.
+This project analyzes **hospital price transparency** data published under federal rules. Hospitals are required to make standard charges available in machine-readable form; this pipeline consumes those files and supports:
 
-**Next improvements:** Orchestration (e.g. Dagster) for scheduled ingest; incremental Silver/dbt; more hospitals and sources; stronger DQ rules and alerting.
+- **Hospital-to-hospital comparison** of rates for the same procedure, payer, and rate type.
+- **Payer and plan comparison** to see how negotiated, gross, and cash rates vary by payer and plan across hospitals.
+- **Exploratory analytics and comparability analysis** over reported standard charges, with explicit handling of rate categories, units, and harmonized dimensions so that only comparable rows are used in comparison views.
 
----
-
-## Quickstart (Sample Data)
-
-Uses the small committed files in `data/sample/` so you can run the pipeline and Streamlit **without downloading full data or any credentials**.
-
-**Prerequisites:** Python 3.10+, PowerShell (or adapt for bash).
-
-1. **Clone and venv**
-   ```powershell
-   cd kc-hospital-price-transparency
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
-
-2. **Install dependencies**
-   ```powershell
-   pip install -r apps/streamlit_app/requirements.txt
-   pip install dbt-core dbt-duckdb
-   ```
-
-3. **Run with sample data**
-   ```powershell
-   $env:SAMPLE_DATA = "1"
-   .\scripts\mvp_local.ps1
-   ```
-   With `SAMPLE_DATA=1`, the script reads from `data/sample/`, runs Bronze ingest → Silver build → dbt build + export → Streamlit. Open the URL shown; the app reads from `dbt/exports/` (Local mode, no credentials).
+The app is built for analysts and stakeholders who need to explore pricing variation, assess data quality, and run like-to-like comparisons without mixing incompatible rate types or naming conventions.
 
 ---
 
-## Full run (Real Data)
+## Business Context
 
-For your own hospital files:
+### Hospital Price Transparency Regulation
 
-1. **Place raw files** in `data/raw_drop/` (CSV and/or JSON). This directory is **intentionally gitignored**; we never commit raw data.
-2. **Optionally** set `RAW_DROP_DIR` to another path, or leave unset to use `data/raw_drop/`.
-3. **Bronze ingest** (no `SAMPLE_DATA`):
-   ```powershell
-   $env:STORAGE_BACKEND = "local"
-   $env:PYTHONPATH = (Get-Location).Path
-   python -c "from ingestion.bronze_ingest import run_bronze_ingest; print(run_bronze_ingest(ingest_date='YYYY-MM-DD'))"
-   ```
-4. **Silver build** → **dbt build + export** → **Streamlit** as in the full local quickstart (see [docs/runbook.md](docs/runbook.md)).
+The **Hospital Price Transparency** rule (CMS-1717-F2, effective January 2021) requires hospitals to disclose standard charges in a consumer-friendly format and as machine-readable data. Hospitals publish files that include negotiated rates with payers, gross charges, discounted cash prices, and minimum/maximum negotiated rates by procedure and plan.
 
-**Force re-ingest (e.g. wrong CSV header):**  
-`.\scripts\reingest_local_bronze.ps1 -IngestDate YYYY-MM-DD -Sources pt_csv -Force` then rebuild Silver. Many hospital CSVs use row 3 as the data header; see [docs/runbook.md](docs/runbook.md) (header sniffing).
+### Why This Data Matters
+
+- **Pricing variation** — Same procedure can have very different rates across hospitals and payers; transparency data makes it possible to quantify this variation.
+- **Payer negotiation transparency** — Negotiated rates reveal what payers actually pay; the data supports analysis of contracting and rate spread.
+- **Hospital benchmarking** — Facilities and analysts can compare their rates to others for the same procedure and payer/plan.
+- **Healthcare analytics** — Researchers and operators use the data for cost modeling, network design, and consumer tools.
+
+This project focuses on a **selected set of hospitals** to keep the pipeline and data model at a practical portfolio scale while demonstrating end-to-end analytics engineering: ingestion, modeling, comparability logic, and an interactive UI.
 
 ---
 
-## BigQuery quickstart (local)
+## Current Architecture
 
-1. Set `GOOGLE_APPLICATION_CREDENTIALS` to your service account JSON path (or use `gcloud auth application-default login`).
-2. Copy `dbt/profiles.template.yml` to `dbt/profiles.yml`; set your `project` and `dataset`. Do not commit `profiles.yml`.
-3. Set `DBT_BQ_PROJECT` and `DBT_BQ_DATASET` (or set them in `profiles.yml`). Marts will be written to the dataset (e.g. `pt_analytics_marts`).
-4. From repo root: `.\scripts\run_bigquery_gold.ps1`
-5. Run Streamlit and set **Data source** to **BigQuery** in the sidebar.
+### Raw Ingestion Layer
 
-**Tables the app expects in the marts dataset:** `dim_hospital`, `dim_payer`, `dim_procedure`, `fct_standard_charges_semantic` (and `dim_source_file` if present).
+- **CSV raw** — Tall and wide CSV files are landed in BigQuery (e.g. `pt_csv_raw_tall`, `pt_csv_raw_wide`) or in local Parquet under `lake/bronze/pt_csv/`. Each row is typically one rate line (procedure, payer, plan, rate type, amount).
+- **JSON raw** — JSON-format price files are landed in BigQuery (`pt_json_extracted_rates` or equivalent) or in local Parquet under `lake/bronze/pt_json/`.
+- **Registry tables** — CSV metadata is stored in registries such as `pt_csv_registry`, including preamble rows (e.g. row 1–2) used to extract hospital name and other file-level metadata. This supports clean hospital name extraction from CSV row 2 / preamble.
 
-**Docs:** [docs/bigquery_publish.md](docs/bigquery_publish.md), [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md)
+### dbt Layers
+
+- **Staging** — Views and tables that read from raw sources, parse JSON/CSV columns, and produce a consistent set of columns (e.g. `stg_pt_csv_tall`, `stg_pt_csv_wide`, `stg_pt_json_rates`, `stg_hospital_metadata`). Staging normalizes field names and types for downstream use.
+- **Intermediate** — Union and base tables (e.g. `int_pt_standard_charges_union`, `int_standard_charges_base`) that combine all sources into one row-per-rate dataset with columns such as `rate_type`, `rate_amount`, `gross_charge`, `discounted_cash`, `minimum`, `maximum`.
+- **Marts** — Dimensions and facts consumed by the Streamlit app and by analysts: `dim_hospital`, `dim_payer`, `dim_payer_harmonized`, `dim_procedure`, `dim_procedure_harmonized`, `fct_standard_charges`, `fct_standard_charges_semantic`, comparability and comparison aggregates (see Data Model below).
+
+### BigQuery as Warehouse
+
+BigQuery is the production warehouse. Raw tables, staging, intermediate, and marts are created in configurable datasets (e.g. `pt_analytics`, `pt_analytics_marts`). The Streamlit app reads from the marts dataset only; ingestion and dbt jobs populate the warehouse.
+
+### Streamlit as Analytics UI
+
+The Streamlit app is the primary user interface. It runs in **BigQuery-only** mode in production (Streamlit Cloud): it does not read from local Parquet. It queries marts for search, comparison, coverage, and data-quality views. Local/demo mode can read from `dbt/exports/` when configured.
 
 ---
 
-## First-run (dbt) setup
+## Tech Stack
 
-Use this order from the **`dbt/`** directory so packages, connection, seeds, models, and tests all run correctly.
+| Component | Technology |
+|-----------|------------|
+| Language | Python 3.10+ |
+| Warehouse | Google BigQuery |
+| Transform | dbt Core |
+| UI | Streamlit |
+| Data frames / I/O | pandas, pyarrow |
+| Charts (comparison pages) | matplotlib |
+| Auth (Cloud) | Google service account via Streamlit Secrets |
+| Version control | Git / GitHub |
 
-**Required order:**
+Additional dependencies: `google-cloud-bigquery`, `db-dtypes` (BigQuery to pandas type mapping), `python-dotenv` for local env, and optional `dbt-duckdb` and DuckDB for local dbt targets.
+
+---
+
+## Data Model: Important Marts
+
+| Mart | Purpose | Business Value |
+|------|---------|----------------|
+| **dim_hospital** | One row per hospital (or source file); includes `hospital_id`, `hospital_name_clean`, `source_file_name`. | Stable hospital identity and display names; joins to all fact tables. |
+| **dim_payer** | Distinct payer and plan names from the data. | Reference list of payers/plans; used for filters and display. |
+| **dim_payer_harmonized** | Payer and plan names normalized to `payer_family` and `plan_family` via seeds and matching. | Enables like-to-like comparison by grouping many raw names into a single family. |
+| **dim_procedure** | Distinct billing code and type with descriptions. | Procedure reference and search. |
+| **dim_procedure_harmonized** | Canonical procedure descriptions per (billing_code, billing_code_type); variant counts. | Single description per code for comparison and search; supports data-quality checks. |
+| **fct_standard_charges** | One row per standard charge from the union; wide rate columns (gross_charge, discounted_cash, etc.) plus `rate_type` and `rate_amount`. | Core fact before semantic normalization. |
+| **fct_standard_charges_semantic** | One row per (standard_charge_sk, rate_category). Normalizes `rate_type` into canonical `rate_category` (negotiated, gross, cash, min, max, percentage, other) and emits one row per rate amount. | BI-safe fact with consistent rate categories; filters null billing_code. |
+| **fct_rates_comparable** | All semantic rows with non-null rate_category and numeric rate_amount; adds `comparability_key`, `is_comparable`, `comparability_reason`. | Flags which rows are suitable for like-to-like comparison; excludes or labels others. |
+| **fct_rates_comparable_harmonized** | Comparable fact joined to `dim_payer_harmonized` for `payer_family` and `plan_family`; same grain as `fct_rates_comparable`. | Fact used by comparison marts; harmonized payer/plan for aggregation. |
+| **fct_rates_comparable_rejects** | Rows where `is_comparable = FALSE` (e.g. rate_category = other, excluded_other). | Diagnostics and “why no results” for comparison pages. |
+| **agg_hospital_procedure_compare** | Aggregated by (billing_code, billing_code_type, payer_family, plan_family, rate_category, rate_unit, comparability_key, hospital_id); min, max, approximate median, row count. Source: harmonized comparable fact only. | Powers Hospital Comparison page: compare rates by hospital for a given procedure and payer/plan. |
+| **agg_payer_plan_compare** | Same grain as above; used for payer/plan-level comparison. | Powers Payer Plan Comparison page and Data Quality coverage matrix. |
+
+---
+
+## Implemented Features and Enhancements
+
+- **BigQuery authentication hardening for Streamlit Cloud** — App validates secrets and connection before running; clear errors when BigQuery is selected but credentials are missing.
+- **Safe debug panel** — Optional debug expander (enabled via `DEBUG=1` in secrets) shows which secret keys exist, BigQuery config summary (no secret values), and a simple connectivity check. No private keys or tokens are displayed.
+- **Secret validation and AttrDict handling** — Robust handling of Streamlit Secrets and service-account structure for Cloud deployments.
+- **Clean hospital name extraction** — Hospital names derived from CSV preamble (e.g. row 2) and registry metadata so `hospital_name_clean` is consistent and human-readable.
+- **Procedure description harmonization** — `dim_procedure_harmonized` provides a canonical description per (billing_code, billing_code_type) and variant counts for data-quality review.
+- **Payer and plan harmonization** — Seed-driven mapping and normalized matching to `payer_family` and `plan_family` so many raw payer/plan names roll up for comparison.
+- **Comparability logic** — Only like-to-like rate comparisons: `rate_category`, `rate_unit`, and `comparability_key` ensure that “other” and incompatible categories are excluded from comparison marts (see Comparability Logic below).
+- **Rejects model** — `fct_rates_comparable_rejects` exposes non-comparable rows with `comparability_reason` for troubleshooting and “why no results” explanations.
+- **Guardrail tests** — dbt tests ensure `rate_category = 'other'` does not appear in `agg_hospital_procedure_compare` or `agg_payer_plan_compare`.
+- **Comparison marts** — `agg_hospital_procedure_compare` and `agg_payer_plan_compare` built from the harmonized comparable fact; they power the Hospital Comparison and Payer Plan Comparison pages.
+- **New Streamlit pages** — Hospital Comparison (compare hospitals for a procedure/payer/plan/rate type) and Payer Plan Comparison (compare by payer_family and plan_family) with downloadable tables and charts.
+- **Data Quality improvements** — Coverage matrix from `agg_payer_plan_compare` (per-hospital comparable row and distinct code counts); variant flags for procedure descriptions and payer-family mappings.
+- **BigQuery type compatibility** — Use of STRING and safe casting (e.g. for varchar-like columns) so dbt and the app work correctly with BigQuery types.
+
+---
+
+## Streamlit App Pages
+
+| Page | Description |
+|------|-------------|
+| **Home** | Overview narrative (what is price transparency, regulation, why these hospitals, executive summary), high-level metrics, and a stacked bar chart of distinct billing codes by hospital and code type (APC excluded). Uses `hospital_name_clean`; hospitals sorted by total distinct services. |
+| **Search & Compare** | Search procedures and filter by billing code, rate category, rate unit, and optional payer/plan and hospitals. Results from `fct_rates_comparable_harmonized` (comparable-only) or from `fct_standard_charges_semantic` (single-hospital). Table and CSV download. |
+| **Hospital Profile** | Drill into one hospital: KPIs (total rows, distinct procedures, payer/plan count, median/min/max rate), top procedures, and payer coverage. Reads from semantic fact and dims. |
+| **Data Quality** | Null-rate metrics, UNKNOWN billing_code_type count, coverage matrix (from `agg_payer_plan_compare`), procedure and payer variant flags, and top outlier rates. CSV/JSON export. |
+| **Hospital Comparison** | Compare min, max, and approximate median rates **by hospital** for a selected procedure, payer family, plan family, rate category, and rate unit. Uses `agg_hospital_procedure_compare`. Table and horizontal bar chart (matplotlib); CSV and PNG download. |
+| **Payer Plan Comparison** | Compare rates **by payer_family** and **plan_family** for a procedure and optional hospital filter. Uses `agg_payer_plan_compare`. Payer-level and plan-level tables and charts; CSV and PNG download. |
+
+Comparison pages (Hospital Comparison, Payer Plan Comparison) and the Data Quality coverage matrix **depend on the comparable and harmonized marts** (`fct_rates_comparable`, `fct_rates_comparable_harmonized`, `agg_hospital_procedure_compare`, `agg_payer_plan_compare`). If those are empty, run the recommended dbt sequence below to rebuild the semantic and comparison layers.
+
+---
+
+## Comparability Logic
+
+Hospital price transparency data is difficult to compare directly because:
+
+- Rate types and labels vary by hospital (e.g. “negotiated”, “negotiated_rate”, “estimated_amount”).
+- Some rows are “other” or non-standard and should not be mixed with negotiated/gross/cash/min/max.
+- Payer and plan names are inconsistent across facilities, so aggregation by raw name would undercount or fragment groups.
+
+This project enforces **like-to-like comparison** as follows:
+
+- **Rate category normalization** — The semantic layer maps source `rate_type` to a canonical `rate_category` (negotiated, gross, cash, min, max, percentage, other). Only negotiated, gross, cash, min, max, and percentage are treated as comparable; “other” is retained for diagnostics but excluded from comparison marts.
+- **Rate unit handling** — `rate_unit` (e.g. dollars vs percent) is part of the comparability key so that dollar and percentage rates are not mixed in the same comparison.
+- **comparability_key** — A composite key (e.g. `billing_code_type | rate_category | rate_unit`) defines the like-to-like group. Rows with the same key are comparable with each other.
+- **is_comparable flag** — Set to TRUE only for allowed rate categories (and optional rules such as rate_unit); FALSE for “other” and unexpected categories. Comparison marts filter on `is_comparable = TRUE` and exclude `rate_category = 'other'`.
+- **Harmonized payer/plan dimensions** — `dim_payer_harmonized` maps raw payer/plan names to `payer_family` and `plan_family`. The harmonized fact and comparison marts use these families so that comparisons aggregate across facilities consistently.
+
+---
+
+## Known Issues and Caveats
+
+- **dbt warnings** — Some dbt warnings may still appear (e.g. unused config path). They do not block runs but can be addressed in a future cleanup.
+- **requests/urllib3** — A dependency warning (e.g. urllib3 version) may appear during dbt or BigQuery client use. It is safe to ignore for normal runs; pin versions only if required by policy.
+- **Hospital-reported variation** — Naming, coding, and rate-type reporting vary by hospital. The pipeline normalizes where possible, but data quality ultimately depends on what facilities publish.
+- **Comparability depends on source quality** — If hospitals do not report standard categories or use many “other” or custom rate types, the number of comparable rows may be limited.
+
+---
+
+## Local Setup and Run Instructions
+
+Use the following order so that the environment, dbt profile, seeds, models, and tests all align.
+
+### 1. Environment
+
+```powershell
+cd kc-hospital-price-transparency
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r apps/streamlit_app/requirements.txt
+```
+
+The app requirements include Streamlit, pandas, matplotlib, pyarrow, db-dtypes, google-cloud-bigquery, and google-auth. For dbt with BigQuery, ensure `dbt-core` and a BigQuery adapter are installed (e.g. `pip install dbt-bigquery` if not already in the app requirements).
+
+### 2. dbt Profile and BigQuery Credentials
+
+- Copy `dbt/profiles.template.yml` to `dbt/profiles.yml`. Do not commit `profiles.yml`.
+- Set `project`, `dataset`, and credentials for BigQuery (e.g. `GOOGLE_APPLICATION_CREDENTIALS` pointing to a service account JSON, or `gcloud auth application-default login`).
+- Set `DBT_BQ_PROJECT` and `DBT_BQ_DATASET` if you use env-driven config (e.g. `pt_analytics_marts` for marts).
+
+### 3. dbt Run Sequence
+
+From the **`dbt/`** directory:
 
 ```powershell
 cd dbt
 dbt deps
 dbt debug
 dbt seed
-dbt run
+dbt run --full-refresh --select fct_standard_charges_semantic
+dbt run --full-refresh --select fct_rates_comparable fct_rates_comparable_harmonized
+dbt run --full-refresh --select agg_hospital_procedure_compare agg_payer_plan_compare
 dbt test
 ```
 
-- **`dbt deps`** — Installs packages from `packages.yml` into `dbt_packages/`. Required before compile/run/test if that folder is missing.
-- **`dbt debug`** — Checks profile and project. Fix any errors before continuing.
-- **`dbt seed`** — Loads seeds (e.g. payer/plan maps) into the configured dataset (e.g. `pt_analytics_marts` on BigQuery).
-- **`dbt run`** — Builds models.
-- **`dbt test`** — Runs data tests.
+- **dbt deps** — Installs packages (e.g. dbt_utils) into `dbt_packages/`. Required before run/test if that folder is missing.
+- **dbt debug** — Verifies profile and connection. Fix any errors before continuing.
+- **dbt seed** — Loads seeds (e.g. payer/plan mapping) into the configured dataset.
+- **Semantic fact first** — Rebuilding `fct_standard_charges_semantic` ensures rate categories are correct. If comparison marts are empty, rebuild this layer before the comparable and aggregate layers.
+- **Comparable and aggregates** — Build comparability and comparison marts in the order above so dependencies are satisfied.
+- **dbt test** — Runs data tests (not_null, relationships, accepted_values, and guardrail tests that ensure “other” does not leak into comparison marts).
 
-**If you run `dbt clean`:** The `clean-targets` in `dbt_project.yml` include `dbt_packages`, so `dbt clean` removes installed packages. You must run **`dbt deps`** again before `dbt compile`, `dbt run`, or `dbt test`.
-
-**Optional (run only marts and guardrail tests):**
+Optional: run only comparison marts and their guardrail tests:
 
 ```powershell
 dbt run --select agg_hospital_procedure_compare agg_payer_plan_compare
 dbt test --select no_other_in_agg_hospital_procedure_compare no_other_in_agg_payer_plan_compare
 ```
-**BigQuery dataset expectations:** With the default profile, staging/intermediate/marts write to the profile’s dataset (often `pt_analytics_marts`). Seeds also go to that dataset (`seed_payer_map`, `seed_plan_map`). Ensure the dataset exists or dbt can create it.
 
----
+### 4. Run Streamlit
 
-## Run Streamlit locally
-
-From the repo root (after generating exports via Quickstart or full run):
+From the repository root:
 
 ```powershell
 streamlit run apps/streamlit_app/Home.py
 ```
 
-The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parquet or CSV) and needs no credentials. Use the sidebar **Data source** to switch to **BigQuery** if you have credentials. If exports are missing, the app shows steps to generate them.
+The app reads from BigQuery when credentials and dataset are configured. Use the sidebar to confirm the active data source.
+
+---
+
+## BigQuery and Streamlit Cloud Notes
+
+- **Streamlit Cloud secrets** — For BigQuery mode on Streamlit Community Cloud, configure **Secrets** (e.g. in Settings) with at least: `gcp_service_account` (full JSON of the service account key), `BQ_PROJECT`, `BQ_DATASET_MARTS`, and optionally `BQ_LOCATION`. The app does not use local credential files on Cloud.
+- **matplotlib** — The Hospital Comparison and Payer Plan Comparison pages use matplotlib for bar charts. The requirements file used by the app (`apps/streamlit_app/requirements.txt`) includes `matplotlib>=3.8,<4`. On Streamlit Cloud, set the **Requirements file** to this path so matplotlib is installed; otherwise those pages may raise `ModuleNotFoundError: No module named 'matplotlib'`.
+- **Redeploy after changes** — After updating dependencies or secrets, trigger a redeploy or reboot of the app so the new environment is used.
+
+Detailed Cloud setup (exact TOML structure, IAM roles, optional APP_MODE) is in the **Deploy to Streamlit Community Cloud** section below.
 
 ---
 
 ## Deploy to Streamlit Community Cloud
 
-- **Entrypoint:** Set the run command to: `streamlit run apps/streamlit_app/Home.py` (main script path).
-- **Root:** Use the repository root as the working directory so that `dbt/exports` and `apps/streamlit_app` resolve correctly.
-- **Dependencies:** `apps/streamlit_app/requirements.txt` (must be used as the Cloud requirements path; it includes matplotlib for Hospital/Payer Comparison charts). Python 3.10+.
+- **Entrypoint:** `streamlit run apps/streamlit_app/Home.py`
+- **Root:** Repository root as the working directory.
+- **Dependencies:** `apps/streamlit_app/requirements.txt`. Python 3.10+.
 
-### Streamlit Cloud → BigQuery setup
+### Streamlit Cloud to BigQuery
 
-BigQuery mode on Streamlit Community Cloud uses **Streamlit Secrets** only (no local credential files). The app reads from the **marts** dataset (default name: **pt_analytics_marts**) in your project.
+BigQuery mode uses **Streamlit Secrets** only. In the Cloud app **Settings → Secrets**, add a TOML block with:
 
-**1. Exact Secrets TOML** — In the Cloud app → **Settings** → **Secrets**, add:
+- **gcp_service_account** — Full service account JSON (as a string or TOML table). No local key files on Cloud.
+- **BQ_PROJECT** — GCP project ID.
+- **BQ_DATASET_MARTS** — Marts dataset (e.g. `pt_analytics_marts`).
+- **BQ_LOCATION** — Optional; default `US`.
 
-   ```toml
-   # Service account as a JSON object (paste your key file contents).
-   # GCP Console → IAM & Admin → Service Accounts → Keys → Add key → JSON.
-   gcp_service_account = '''
-   {"type": "service_account", "project_id": "pricing-transparency-portfolio", "private_key_id": "...", "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n", "client_email": "your-sa@project.iam.gserviceaccount.com", "client_id": "...", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "..."}
-   '''
+The service account needs **BigQuery Data Viewer** (or **BigQuery User**) and **BigQuery Job User** so the app can run queries.
 
-   BQ_PROJECT = "pricing-transparency-portfolio"
-   BQ_DATASET_MARTS = "pt_analytics_marts"
-   BQ_LOCATION = "US"
-   ```
+Optional: **DEBUG = "1"** in secrets enables the safe debug panel in the sidebar (key names and config only; no secret values).
 
-   **Required keys:**
-   - **`gcp_service_account`** — Full service account JSON (dict-shaped; paste key file as string or use TOML table). No local files on Cloud.
-   - **`BQ_PROJECT`** — GCP project ID (default: `pricing-transparency-portfolio`).
-   - **`BQ_DATASET_MARTS`** — Marts dataset name (default: `pt_analytics_marts`). App reads `dim_hospital`, `dim_payer`, `dim_procedure`, `fct_standard_charges_semantic` from this dataset.
-   - **`BQ_LOCATION`** — Optional; default `US`.
+### Tables
 
-**2. Required IAM roles** — The service account must have:
-   - **BigQuery Data Viewer** (or **BigQuery User**) — to run queries and read tables.
-   - **BigQuery Job User** — to submit jobs.
-
-   Grant in GCP Console: **IAM & Admin** → find the service account → add the roles above (or use a custom role with `bigquery.jobs.create`, `bigquery.tables.getData`, `bigquery.tables.get`).
-
-**3. Optional:** Set **APP_MODE=bigquery** in app settings to default to BigQuery; otherwise switch in the sidebar. If BigQuery is selected but secrets are missing, the app shows a clear error listing these keys and falls back to **Local (demo)**.
-
-**4. Tables** — Ensure the marts dataset and tables exist (e.g. run `scripts/run_bigquery_gold.ps1` locally or in CI, then deploy). See [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md).
-
-### Local (demo) mode
-
-- **Local (demo)** reads from `dbt/exports/` (Parquet/CSV). No credentials required.
-- If **SAMPLE_DATA=1** and exports are missing, the app auto-generates them from `data/sample/` at startup (Bronze → Silver → dbt → export). So Local works on Cloud without BigQuery when `SAMPLE_DATA=1`.
-- Unless BigQuery is configured and selected, the app uses Local (demo) or sample data.
-
-### Debug panel (Streamlit Cloud)
-
-To diagnose why BigQuery is not configured or not working on Streamlit Community Cloud, enable the safe debug panel:
-
-- In **Settings → Secrets**, add: **`DEBUG = "1"`** (or set env **`DEBUG=1`** in app settings).
-- The sidebar will show a **Debug (no secrets)** expander with: which secret keys exist, whether `gcp_service_account` is present, its field names only (no values), BigQuery client creation success/failure, and a simple `SELECT 1` smoke test result.
-- **Never paste private keys, tokens, or secret values** into issues, logs, or screenshots. The debug panel does not display any secret values.
+Ensure the marts dataset and tables exist (run the dbt sequence above from a machine with BigQuery access, or via CI). The app expects at least: `dim_hospital`, `dim_payer`, `dim_procedure`, `fct_standard_charges_semantic`, and for comparison pages: `fct_rates_comparable_harmonized`, `agg_hospital_procedure_compare`, `agg_payer_plan_compare`, plus `dim_payer_harmonized`, `dim_procedure_harmonized`.
 
 ---
 
-## Security note
+## Security and Repo Hygiene
 
-- **Raw data and credentials are not committed.**  
-  `data/raw_drop/`, `lake/`, `warehouse/`, `dbt/exports/`, and secrets are gitignored.
-- Use **`.env.example`** as a template for local env; copy to `.env` and keep `.env` out of git.
-- Use **`dbt/profiles.template.yml`**; copy to `dbt/profiles.yml` and never commit `profiles.yml`.
+- Raw data and credentials are not committed. `data/raw_drop/`, `lake/`, `dbt/exports/`, and secrets are gitignored.
+- Use `.env.example` as a template; copy to `.env` and keep `.env` out of version control.
+- Use `dbt/profiles.template.yml`; copy to `dbt/profiles.yml` and do not commit `profiles.yml`.
 
-**Repo hygiene:** [docs/repo_hygiene.md](docs/repo_hygiene.md). Before pushing, run **`.\scripts\preflight_repo_audit.ps1`** (or `./scripts/preflight_repo_audit.sh`) to check for tracked secrets or large files.
+Before pushing, run `.\scripts\preflight_repo_audit.ps1` (or the shell equivalent) to check for tracked secrets or oversized files. See [docs/repo_hygiene.md](docs/repo_hygiene.md).
 
 ---
 
 ## Troubleshooting
 
-| Issue | What to do |
-|-------|------------|
-| No or wrong CSV rows in Silver | CSVs often use row 3 as header. [Force re-ingest](docs/runbook.md) Bronze (CSV) then rebuild Silver. |
-| Quarantine rate high | Inspect `lake/silver/quarantine/`; see [data quality](docs/data_quality.md). |
-| dbt build fails (local) | Set `DBT_SILVER_GLOB` to your Silver Parquet glob; use target `local_duckdb` and `execution_mode: local`. |
-| dbt build fails (BigQuery) | Copy `dbt/profiles.template.yml` to `dbt/profiles.yml`, set project/dataset and credentials. |
-| Streamlit "Local data missing" | Run Bronze → Silver → dbt build → export (or sample quickstart above). Ensure `dbt/exports/` has required tables. |
-| Streamlit "BigQuery unavailable" | Set credentials or use **Local** in the sidebar. |
+| Issue | Action |
+|-------|--------|
+| No or wrong CSV rows in Silver | Many CSVs use row 3 as the data header. Use force re-ingest for Bronze (CSV) then rebuild Silver. See [docs/runbook.md](docs/runbook.md). |
+| Comparison marts empty | Rebuild semantic first: `dbt run --full-refresh --select fct_standard_charges_semantic`, then `fct_rates_comparable` and `fct_rates_comparable_harmonized`, then the agg models. Check `diag_comparability_funnel` or semantic rate_category diagnostics. |
+| dbt build fails (BigQuery) | Verify `profiles.yml`, project/dataset, and credentials. Ensure dataset exists or dbt can create it. |
+| Streamlit “BigQuery unavailable” | Set credentials and secrets; use the debug panel (DEBUG=1) to confirm which keys are present and whether the client is created. |
+| ModuleNotFoundError: matplotlib | Use `apps/streamlit_app/requirements.txt` as the Cloud requirements file so matplotlib is installed. |
 
-**Full runbook:** [docs/runbook.md](docs/runbook.md)
-
-### Known warnings
-
-- **RequestsDependencyWarning (urllib3 version):** You may see a warning that `urllib3` (e.g. 2.6.3) doesn’t match a supported version. This comes from the `requests`/`urllib3` stack used by dbt or the BigQuery client. It is safe to ignore for normal runs. To try to align versions, pin in your environment (e.g. `urllib3<2.7` in `requirements.txt` or a constraints file); only do this if you need to satisfy a strict policy, as it can conflict with other packages.
+Additional runbooks: [docs/runbook.md](docs/runbook.md), [docs/bigquery_publish.md](docs/bigquery_publish.md), [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md).
 
 ---
 
 ## Documentation
 
-| Doc | Description |
-|-----|-------------|
-| [docs/architecture.md](docs/architecture.md) | Pipeline diagram, design choices. |
-| [docs/runbook.md](docs/runbook.md) | Bronze re-ingest, header sniffing, failures, env vars. |
-| [docs/repo_hygiene.md](docs/repo_hygiene.md) | Why raw_drop/lake are excluded, preflight script, full data. |
+| Document | Description |
+|----------|-------------|
+| [docs/architecture.md](docs/architecture.md) | Pipeline diagram and design choices. |
+| [docs/runbook.md](docs/runbook.md) | Bronze re-ingest, header detection, failures, env vars. |
+| [docs/repo_hygiene.md](docs/repo_hygiene.md) | Why raw_drop/lake are excluded, preflight script. |
 | [docs/bigquery_publish.md](docs/bigquery_publish.md) | BigQuery publish and validation. |
-| [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) | BigQuery cleanup runbook: list/delete datasets, required tables, “do not delete marts” warnings. |
+| [docs/bigquery_cleanup.md](docs/bigquery_cleanup.md) | BigQuery cleanup: list/delete datasets, required tables. |
 | [docs/data_quality.md](docs/data_quality.md) | Quarantine codes, dbt tests, limitations. |
 
 ---
 
-## Project structure
+## Project Structure
 
 | Path | Purpose |
 |------|---------|
-| `apps/streamlit_app/` | Streamlit app (Home, Search & Compare, Hospital Profile, Data Quality). |
-| `data/sample/` | Small sample JSON/CSV for quickstart (committed). |
-| `data/raw_drop/` | Your raw files (gitignored). |
-| `dbt/` | dbt project; use `profiles.template.yml` → copy to `profiles.yml`. |
-| `ingestion/` | Bronze ingest (CSV/JSON → Parquet). |
-| `transform/` | Silver build (standardize + quarantine). |
-| `scripts/` | `mvp_local.ps1`, `run_bigquery_gold.ps1`, `preflight_repo_audit.ps1`, etc. |
+| `apps/streamlit_app/` | Streamlit app: Home, Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison. |
+| `data/sample/` | Small sample CSV/JSON for quickstart (committed). |
+| `data/raw_drop/` | Raw file drop (gitignored). |
+| `dbt/` | dbt project; copy `profiles.template.yml` to `profiles.yml`. |
+| `ingestion/` | Bronze ingest (CSV/JSON to Parquet or BigQuery). |
+| `transform/` | Silver build (standardize and quarantine). |
+| `scripts/` | `mvp_local.ps1`, `run_bigquery_gold.ps1`, `preflight_repo_audit.ps1`, and related helpers. |
+
+---
+
+## What This Project Demonstrates
+
+This repository is intended as portfolio evidence of:
+
+- **Healthcare analytics engineering** — End-to-end pipeline from raw hospital transparency files to comparison-ready marts and a live dashboard.
+- **dbt dimensional modeling** — Staging, intermediate, and marts with clear grain; star-style dimensions and facts; seeds for mapping; and tests for relationships and guardrails.
+- **BigQuery warehouse design** — Raw landing, staging, and marts in BigQuery with appropriate schemas and incremental patterns where used.
+- **Data quality guardrails** — Comparability logic, rejects model, and tests that prevent invalid categories (e.g. “other”) from appearing in comparison outputs.
+- **Semantic modeling** — A dedicated semantic fact that normalizes rate categories and exposes a single, BI-safe entry point for downstream comparison and reporting.
+- **Dashboard and analytics app development** — A multi-page Streamlit app with filters, tables, charts, and downloads, wired to BigQuery and suitable for deployment on Streamlit Cloud.
