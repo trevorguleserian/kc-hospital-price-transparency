@@ -463,6 +463,48 @@ def get_overview_metrics(_mode: Optional[str] = None) -> dict:
 
 
 @st.cache_data
+def get_home_hospital_code_type_breakdown(
+    exclude_types: Optional[list[str]] = None,
+    _mode: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Distinct billing_code count by hospital (hospital_name_clean) and billing_code_type.
+    Uses fct_standard_charges_semantic joined to dim_hospital. Excludes APC by default.
+    Returns: hospital_name_clean, billing_code_type, distinct_codes, distinct_billing_code_count, total_distinct_codes.
+    Sorted by total_distinct_codes DESC. exclude_types: billing_code_type values to exclude (default ['APC']).
+    """
+    exclude = list(exclude_types) if exclude_types is not None else ["APC"]
+    exclude_upper = [x.strip().upper() for x in exclude if x and str(x).strip()]
+
+    sql = f"""
+    WITH base AS (
+      SELECT
+        COALESCE(d.hospital_name_clean, f.hospital_id) AS hospital_name_clean,
+        COALESCE(TRIM(CAST(f.billing_code_type AS STRING)), 'UNKNOWN') AS billing_code_type,
+        COUNT(DISTINCT f.billing_code) AS distinct_codes
+      FROM {_bq_table('fct_standard_charges_semantic')} f
+      LEFT JOIN {_bq_table('dim_hospital')} d ON f.hospital_id = d.hospital_id
+      WHERE 1=1
+    """
+    if exclude_upper:
+        placeholders = ", ".join([f"'{e}'" for e in exclude_upper])
+        sql += f"\n      AND UPPER(TRIM(COALESCE(CAST(f.billing_code_type AS STRING), ''))) NOT IN ({placeholders})"
+    sql += """
+      GROUP BY 1, 2
+    )
+    SELECT
+      hospital_name_clean,
+      billing_code_type,
+      distinct_codes,
+      distinct_codes AS distinct_billing_code_count,
+      SUM(distinct_codes) OVER (PARTITION BY hospital_name_clean) AS total_distinct_codes
+    FROM base
+    ORDER BY total_distinct_codes DESC, hospital_name_clean, billing_code_type
+    """
+    return _bq_query(sql)
+
+
+@st.cache_data
 def get_rate_category_distribution(_mode: Optional[str] = None) -> pd.DataFrame:
     """Rate category counts for overview from BigQuery. Cached."""
     sql = f"""

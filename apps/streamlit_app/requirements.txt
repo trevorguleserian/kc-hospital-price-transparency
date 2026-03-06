@@ -1,5 +1,7 @@
+# Use this file for Streamlit Cloud: set "Python version" and "Requirements file" to this path (e.g. apps/streamlit_app/requirements.txt).
 streamlit
 pandas
+matplotlib>=3.8,<4
 pyarrow
 db-dtypes
 google-cloud-bigquery

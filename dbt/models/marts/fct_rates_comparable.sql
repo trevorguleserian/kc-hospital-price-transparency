@@ -10,18 +10,13 @@
   Data contract: fct_rates_comparable
   -----------------------------------
   All rows from semantic with non-null rate_category and numeric rate_amount.
-  rate_category is normalized (LOWER(TRIM)). is_comparable = TRUE only for categories
-  used in hospital/payer comparisons (negotiated, gross, cash, min, max, percentage).
-  rate_category = 'other' is kept for diagnostics but is_comparable = FALSE.
-  comparability_reason explains why a row is or is not comparable.
+  rate_category is normalized (LOWER(TRIM)). is_comparable = TRUE for
+  negotiated, gross, cash, min, max, percentage (rate_unit not required).
+  is_comparable = FALSE for other. comparability_reason: comparable | excluded_other | excluded_unexpected_category.
+  comparability_key: concat(billing_code_type, '|', rate_category_norm, '|', coalesce(rate_unit_norm, '')).
 */
-
-{# Categories allowed in the table (accepted_values); includes other. #}
 {% set accepted_rate_categories = var('accepted_rate_categories', ['negotiated', 'gross', 'cash', 'min', 'max', 'percentage', 'other']) %}
-{# Categories that are comparable (is_comparable = TRUE); excludes other. #}
 {% set comparable_rate_categories = var('comparable_rate_categories', ['negotiated', 'gross', 'cash', 'min', 'max', 'percentage']) %}
-{% set unitless_rate_categories = var('unitless_rate_categories', ['percentage']) %}
-{% set unit_optional_rate_categories = var('unit_optional_rate_categories', ['negotiated', 'gross', 'cash', 'min', 'max', 'percentage']) %}
 
 with semantic as (
   select
@@ -66,13 +61,10 @@ with_keys as (
       coalesce(trim(coalesce(cast(rate_unit as string), '')), '')
     ) as comparability_key,
     case
-      when lower(trim(coalesce(cast(rate_category as string), ''))) not in ({% for c in accepted_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'category_not_allowed'
-      when lower(trim(coalesce(cast(rate_category as string), ''))) = 'other' then 'category_not_allowed'
-      when lower(trim(coalesce(cast(rate_category as string), ''))) not in ({% for c in comparable_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'category_not_allowed'
-      when trim(coalesce(cast(rate_unit as string), '')) != '' then 'ALLOWLIST_AND_HAS_UNIT'
-      when lower(trim(coalesce(cast(rate_category as string), ''))) in ({% for c in unitless_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'ALLOWLIST_UNIT_MISSING_BUT_ALLOWED'
-      when lower(trim(coalesce(cast(rate_category as string), ''))) in ({% for c in unit_optional_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'ALLOWLIST_UNIT_MISSING_BUT_ALLOWED'
-      else 'missing_rate_unit'
+      when lower(trim(coalesce(cast(rate_category as string), ''))) = 'other' then 'excluded_other'
+      when lower(trim(coalesce(cast(rate_category as string), ''))) not in ({% for c in accepted_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'excluded_unexpected_category'
+      when lower(trim(coalesce(cast(rate_category as string), ''))) not in ({% for c in comparable_rate_categories %}'{{ c }}'{% if not loop.last %}, {% endif %}{% endfor %}) then 'excluded_other'
+      else 'comparable'
     end as comparability_reason
   from semantic
 )
@@ -91,7 +83,7 @@ select
   rate_amount,
   rate_unit,
   comparability_key,
-  comparability_reason in ('ALLOWLIST_AND_HAS_UNIT', 'ALLOWLIST_UNIT_MISSING_BUT_ALLOWED') as is_comparable,
+  comparability_reason = 'comparable' as is_comparable,
   comparability_reason,
   source_system,
   source_file_name,

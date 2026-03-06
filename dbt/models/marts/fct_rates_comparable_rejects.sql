@@ -7,7 +7,7 @@
 }}
 
 /*
-  Rows where is_comparable = FALSE (e.g. rate_category = 'other', category_not_allowed,
+  Rows where is_comparable = FALSE (e.g. rate_category = 'other', excluded_other,
   missing_rate_unit). Limited to most recent 1M by ingested_at for diagnostics.
 */
 with ranked as (

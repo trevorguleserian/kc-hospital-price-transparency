@@ -141,7 +141,7 @@ The app defaults to **Local / Sample** mode: it reads from `dbt/exports/` (Parqu
 
 - **Entrypoint:** Set the run command to: `streamlit run apps/streamlit_app/Home.py` (main script path).
 - **Root:** Use the repository root as the working directory so that `dbt/exports` and `apps/streamlit_app` resolve correctly.
-- **Dependencies:** `apps/streamlit_app/requirements.txt`. Python 3.10+.
+- **Dependencies:** `apps/streamlit_app/requirements.txt` (must be used as the Cloud requirements path; it includes matplotlib for Hospital/Payer Comparison charts). Python 3.10+.
 
 ### Streamlit Cloud → BigQuery setup
 

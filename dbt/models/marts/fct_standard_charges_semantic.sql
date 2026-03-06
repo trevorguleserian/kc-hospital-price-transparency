@@ -114,7 +114,8 @@ base as (
   where u.billing_code is not null
 ),
 
--- Primary rate row: map rate_type to canonical rate_category.
+-- Primary rate row: map rate_type to canonical rate_category (negotiated, gross, cash, min, max, percentage, other).
+-- Normalize with lower/trim; use coalesce(rate_type,'') so null/empty does not fall to 'other'. Fallback: empty + typed column match -> that category; else empty -> negotiated.
 primary_rows as (
   select
     b.standard_charge_sk,
@@ -127,17 +128,22 @@ primary_rows as (
     b.plan_name,
     coalesce(nullif(trim(
       case
-        when lower(coalesce(b.rate_type, '')) in ('negotiated_rate', 'negotiated_dollar', 'negotiated') then 'negotiated'
-        when lower(coalesce(b.rate_type, '')) in ('negotiated_percentage', 'percentage') then 'percentage'
-        when lower(coalesce(b.rate_type, '')) in ('gross_charge', 'gross', 'standard_charge_gross') then 'gross'
-        when lower(coalesce(b.rate_type, '')) in ('discounted_cash', 'cash_price', 'cash') then 'cash'
-        when lower(coalesce(b.rate_type, '')) in ('min', 'minimum') then 'min'
-        when lower(coalesce(b.rate_type, '')) in ('max', 'maximum') then 'max'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('negotiated_rate', 'negotiated_dollar', 'negotiated', 'estimated_amount', 'estimated', 'self_pay', 'self_pay_rate', 'self-pay') then 'negotiated'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('negotiated_percentage', 'percentage') then 'percentage'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('gross_charge', 'gross', 'standard_charge_gross', 'standard_charge', 'charge') then 'gross'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('discounted_cash', 'discounted_cash_price', 'cash_price', 'cash') then 'cash'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('min', 'minimum') then 'min'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) in ('max', 'maximum') then 'max'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) = '' and b.gross_charge is not null and safe_cast(b.rate_amount as numeric) = safe_cast(b.gross_charge as numeric) then 'gross'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) = '' and b.discounted_cash is not null and safe_cast(b.rate_amount as numeric) = safe_cast(b.discounted_cash as numeric) then 'cash'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) = '' and b.minimum is not null and safe_cast(b.rate_amount as numeric) = safe_cast(b.minimum as numeric) then 'min'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) = '' and b.maximum is not null and safe_cast(b.rate_amount as numeric) = safe_cast(b.maximum as numeric) then 'max'
+        when lower(trim(coalesce(cast(b.rate_type as string), ''))) = '' then 'negotiated'
         else 'other'
       end
     ), ''), 'other') as rate_category,
     safe_cast(b.rate_amount as numeric) as rate_amount,
-    case when lower(coalesce(b.rate_type, '')) like '%percent%' then 'percent' else 'dollars' end as rate_unit,
+    case when lower(trim(coalesce(cast(b.rate_type as string), ''))) like '%percent%' then 'percent' else 'dollars' end as rate_unit,
     b.source_system,
     b.source_file_name,
     b.ingested_at,

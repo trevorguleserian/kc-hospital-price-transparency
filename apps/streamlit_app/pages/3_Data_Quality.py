@@ -44,8 +44,8 @@ st.divider()
 st.subheader("Coverage matrix (per hospital)")
 st.caption("From agg_payer_plan_compare: distinct billing codes, payer_family, plan_family counts and total comparable rows per hospital.")
 coverage = data.get_coverage_matrix(data.get_mode())
-if coverage.empty:
-    st.caption("No coverage data (agg_payer_plan_compare may not be built yet).")
+if coverage is None or coverage.empty:
+    st.caption("No coverage data. Ensure agg_payer_plan_compare is built (dbt run --select agg_payer_plan_compare+).")
 else:
     # Show hospital_name_clean first for readability
     display_cols = ["hospital_name_clean", "hospital_id", "distinct_billing_codes", "distinct_payer_family", "distinct_plan_family", "total_comparable_rows"]

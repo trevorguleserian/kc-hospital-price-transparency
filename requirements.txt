@@ -1,7 +1,9 @@
 # Root requirements; Streamlit app uses apps/streamlit_app/requirements.txt
 # Include BigQuery->Pandas deps for to_dataframe() (db-dtypes, pyarrow)
+# matplotlib required for Hospital Comparison and Payer Plan Comparison charts (Cloud uses root or app requirements)
 streamlit
 pandas
+matplotlib>=3.8,<4
 pyarrow
 db-dtypes
 google-cloud-bigquery

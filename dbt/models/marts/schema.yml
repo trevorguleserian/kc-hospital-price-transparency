@@ -188,7 +188,7 @@ models:
         tests:
           - not_null
       - name: comparability_reason
-        description: "Why comparable or not: ALLOWLIST_AND_HAS_UNIT, ALLOWLIST_UNIT_MISSING_BUT_ALLOWED, category_not_allowed, missing_rate_unit, etc."
+        description: "Why comparable or not: comparable, excluded_other, excluded_unexpected_category."
         tests:
           - not_null
       - name: comparability_key
