@@ -272,3 +272,30 @@ models:
       - name: header_count
         description: "CSV header column count when applicable."
     tests: []
+
+  - name: diag_billing_code_format_issues
+    description: "Diagnostic view of billing_code values that do not match the expected format for their billing_code_type (e.g. CPT exactly 5 digits, HCPCS 5 alphanumeric). Normalized for validation only (trim, upper; ICD-10-CM dot-stripped, NDC dash-stripped). Aggregated by billing_code_type, billing_code, issue_reason with row_count. CDM and UNKNOWN excluded; NDC is warning-only."
+    columns:
+      - name: billing_code
+        description: "Original billing code from the fact."
+      - name: billing_code_type
+        description: "Code type (e.g. CPT, HCPCS, ICD_10_PCS)."
+      - name: normalized_billing_code
+        description: "Code after trim/upper and type-specific normalization for validation."
+      - name: issue_reason
+        description: "Reason the code failed format validation (e.g. cpt_expected_5_digits, ndc_not_10_or_11_digits)."
+      - name: row_count
+        description: "Number of fact rows with this (billing_code, billing_code_type, issue_reason)."
+    tests: []
+
+# Singular test: enforces billing code format by type (see dbt/tests/assert_billing_code_format_by_type.sql).
+# Test fails when dim_procedure contains codes that do not match the expected structure for their billing_code_type.
+
+  - name: diag_hospital_name_display_issues
+    description: "Diagnostic: dim_hospital rows where hospital_name_clean still starts with a digit (numeric prefix). Use to verify prefix stripping."
+    columns:
+      - name: hospital_id
+      - name: hospital_name
+      - name: hospital_name_clean
+      - name: source_file_name
+    tests: []

@@ -19,11 +19,11 @@ with csv_clean as (
   select
     source_file_name,
     coalesce(
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.hospital_name') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.hospital') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.facility_name') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$["Hospital Name"]') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$["Facility Name"]') as string)), '')
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"hospital_name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"hospital"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"facility_name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"Hospital Name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"Facility Name"\s*:\s*"([^"]+)"')), '')
     ) as hospital_name_clean
   from {{ source('pt_analytics', 'pt_csv_registry') }}
 ),

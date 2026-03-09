@@ -33,13 +33,16 @@ with base as (
   group by source_file_name
 ),
 
+-- Extract preamble hospital name via regex (avoids BigQuery JSON path issues on preamble_kv).
 csv_registry as (
   select
     source_file_name,
     coalesce(
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.hospital_name') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.hospital') as string)), ''),
-      nullif(trim(safe_cast(json_value(preamble_kv, '$.facility_name') as string)), '')
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"hospital_name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"hospital"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"facility_name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"Hospital Name"\s*:\s*"([^"]+)"')), ''),
+      nullif(trim(regexp_extract(to_json_string(preamble_kv), r'"Facility Name"\s*:\s*"([^"]+)"')), '')
     ) as preamble_name
   from {{ source('pt_analytics', 'pt_csv_registry') }}
 ),
@@ -112,13 +115,29 @@ with_clean as (
   from derived_from_file
 ),
 
+-- Strip leading numeric/facility-id prefixes (e.g. "45 0503121 Centerpoint Medical Center" -> "Centerpoint Medical Center").
+-- Pattern: 1-3 digits, space(s), 5+ digits, space(s) at start (CCN/NPI-style). Then trim and collapse spaces again.
+with_stripped_prefix as (
+  select
+    source_file_name,
+    source_system,
+    hospital_name_raw,
+    trim(
+      regexp_replace(
+        regexp_replace(hospital_name_clean, r'^\d{1,3}\s+\d{5,}\s*', ''),
+        r' +', ' '
+      )
+    ) as hospital_name_clean
+  from with_clean
+),
+
 with_clean_final as (
   select
     w.source_file_name,
     w.source_system,
     cast(w.hospital_name_raw as string) as hospital_name,
     coalesce(nullif(trim(w.hospital_name_clean), ''), w.source_file_name) as hospital_name_clean
-  from with_clean w
+  from with_stripped_prefix w
 ),
 
 -- hospital_name_norm: lower, remove punctuation, collapse spaces.
