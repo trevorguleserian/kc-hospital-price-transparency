@@ -4,6 +4,22 @@ Analytics pipeline and dashboard for **CMS Hospital Price Transparency** data. T
 
 ---
 
+## Live Demo
+
+You can explore the full analytics application and embedded BI dashboard here:
+
+[Open the Streamlit Application](https://PASTE_STREAMLIT_APP_URL_HERE)
+
+This app demonstrates an end-to-end analytics platform built on healthcare price transparency data, including:
+
+- data ingestion and validation of hospital machine-readable files
+- dbt semantic modeling in BigQuery
+- harmonized billing code and payer dimensions
+- executive BI dashboards built in Looker Studio
+- embedded analytics delivered through a Streamlit application
+
+---
+
 ## Project Overview
 
 This project analyzes **hospital price transparency** data published under federal rules. Hospitals are required to make standard charges available in machine-readable form; this pipeline consumes those files and supports:
