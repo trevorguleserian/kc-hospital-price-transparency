@@ -123,6 +123,7 @@ Additional dependencies: `google-cloud-bigquery`, `db-dtypes` (BigQuery to panda
 | **Hospital Comparison** | Compare min, max, and approximate median rates **by hospital** for a selected procedure, payer family, plan family, rate category, and rate unit. Uses `agg_hospital_procedure_compare`. Table and horizontal bar chart (matplotlib); CSV and PNG download. |
 | **Payer Plan Comparison** | Compare rates **by payer_family** and **plan_family** for a procedure and optional hospital filter. Uses `agg_payer_plan_compare`. Payer-level and plan-level tables and charts; CSV and PNG download. |
 | **Top Codes by Type** | QA-style view: top billing codes by row count from app-facing marts (valid codes only). Optional filters: billing code type, hospitals. Columns: billing_code, billing_code_type, canonical_description, row_count, hospitals_covered. CSV download. |
+| **Metabase Executive Dashboard** | Embedded Metabase dashboard (iframe): executive CPT/MS-DRG comparisons, negotiated comparable rates, harmonized payer/procedure groupings. Requires `METABASE_EMBED_URL` in secrets or environment. |
 
 Comparison pages (Hospital Comparison, Payer Plan Comparison) and the Data Quality coverage matrix **depend on the comparable and harmonized marts** (`fct_rates_comparable`, `fct_rates_comparable_harmonized`, `agg_hospital_procedure_compare`, `agg_payer_plan_compare`). If those are empty, run the recommended dbt sequence below to rebuild the semantic and comparison layers.
 
@@ -285,6 +286,22 @@ streamlit run apps/streamlit_app/Home.py
 
 The app reads from BigQuery when credentials and dataset are configured. Use the sidebar to confirm the active data source.
 
+#### Testing the Metabase Executive Dashboard page
+
+The **Metabase Executive Dashboard** page embeds a Metabase dashboard via iframe. To test it locally:
+
+1. **Set the embed URL** (one of):
+   - **Streamlit secrets:** Create `.streamlit/secrets.toml` (do not commit). Add:
+     ```toml
+     METABASE_EMBED_URL = "http://192.168.1.50:3001/public/dashboard/a89193b3-8a8f-4a7c-9961-4df50e4f52e0"
+     ```
+     You can copy from `.streamlit/secrets.template.toml`, which contains the same key and example URL. Do not overwrite other keys already in `secrets.toml`; add `METABASE_EMBED_URL` alongside your existing BigQuery secrets.
+   - **Environment variable:** Set `METABASE_EMBED_URL` in your shell or `.env` (e.g. `$env:METABASE_EMBED_URL = "http://..."` in PowerShell).
+2. Ensure Metabase is running and the dashboard URL is reachable from your machine (e.g. same network if using a local IP).
+3. Run the app as above, then open **Metabase Executive Dashboard** from the sidebar.
+
+If `METABASE_EMBED_URL` is not set, the page shows a warning and does not embed the iframe.
+
 ---
 
 ## BigQuery and Streamlit Cloud Notes
@@ -315,6 +332,8 @@ BigQuery mode uses **Streamlit Secrets** only. In the Cloud app **Settings → S
 The service account needs **BigQuery Data Viewer** (or **BigQuery User**) and **BigQuery Job User** so the app can run queries.
 
 Optional: **DEBUG = "1"** in secrets enables the safe debug panel in the sidebar (key names and config only; no secret values).
+
+Optional: **METABASE_EMBED_URL** — Full URL of the Metabase public/signed dashboard to embed on the "Metabase Executive Dashboard" page (e.g. `METABASE_EMBED_URL = "https://your-metabase/public/dashboard/..."`). If omitted, that page shows a configuration warning.
 
 ### Tables
 
@@ -363,7 +382,7 @@ Additional runbooks: [docs/runbook.md](docs/runbook.md), [docs/bigquery_publish.
 
 | Path | Purpose |
 |------|---------|
-| `apps/streamlit_app/` | Streamlit app: Home, Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison. |
+| `apps/streamlit_app/` | Streamlit app: Home, Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison, Metabase Executive Dashboard. |
 | `data/sample/` | Small sample CSV/JSON for quickstart (committed). |
 | `data/raw_drop/` | Raw file drop (gitignored). |
 | `dbt/` | dbt project; copy `profiles.template.yml` to `profiles.yml`. |
