@@ -50,7 +50,22 @@ with semantic as (
 
 with_keys as (
   select
-    *,
+    semantic_charge_sk,
+    standard_charge_sk,
+    hospital_id,
+    hospital_name,
+    {{ normalize_billing_code_for_storage('billing_code', 'billing_code_type') }} as billing_code,
+    billing_code_type,
+    description,
+    payer_name,
+    plan_name,
+    rate_category,
+    rate_amount,
+    rate_unit,
+    source_system,
+    source_file_name,
+    ingested_at,
+    contracting_method,
     lower(trim(cast(rate_category as string))) as rate_category_norm,
     trim(coalesce(cast(rate_unit as string), '')) as rate_unit_trim,
     concat(
