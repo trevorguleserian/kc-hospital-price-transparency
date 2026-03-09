@@ -1,18 +1,21 @@
 # KC Hospital Price Transparency
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://kc-hospital-price-transparency-3h7fq5ynahbz7wyn3iktop.streamlit.app/)
+
 Analytics pipeline and dashboard for **CMS Hospital Price Transparency** data. The project ingests raw standard-charge files (CSV and JSON), normalizes and models them with **dbt** in **BigQuery**, and serves a **Streamlit** app for exploratory analytics and like-to-like comparison of reported hospital standard charges across facilities and payers.
 
 ---
 
 ## Live Demo
 
-You can explore the full analytics application and embedded BI dashboard here:
+You can explore the full analytics platform and embedded executive BI dashboard here:
 
-[Open the Streamlit Application](https://PASTE_STREAMLIT_APP_URL_HERE)
+🔗 **Streamlit Application:**  
+https://kc-hospital-price-transparency-3h7fq5ynahbz7wyn3iktop.streamlit.app/
 
-This app demonstrates an end-to-end analytics platform built on healthcare price transparency data, including:
+This application demonstrates an end-to-end analytics engineering workflow built on healthcare price transparency data, including:
 
-- data ingestion and validation of hospital machine-readable files
+- ingestion and validation of hospital machine-readable files
 - dbt semantic modeling in BigQuery
 - harmonized billing code and payer dimensions
 - executive BI dashboards built in Looker Studio
