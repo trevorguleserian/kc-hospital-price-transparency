@@ -116,20 +116,16 @@ Additional dependencies: `google-cloud-bigquery`, `db-dtypes` (BigQuery to panda
 
 ---
 
-## Streamlit App Pages
+## Streamlit App Pages (recruiter-facing)
+
+The app is simplified to two pages for a polished portfolio experience:
 
 | Page | Description |
 |------|-------------|
-| **Home** | Overview narrative (what is price transparency, regulation, why these hospitals, executive summary), high-level metrics, and a stacked bar chart of distinct billing codes by hospital and code type (APC excluded). Uses `hospital_name_clean`; hospitals sorted by total distinct services. |
-| **Search & Compare** | Search procedures and filter by billing code, rate category, rate unit, and optional payer/plan and hospitals. Results from `fct_rates_comparable_harmonized` (comparable-only) or from `fct_standard_charges_semantic` (single-hospital). Table and CSV download. |
-| **Hospital Profile** | Drill into one hospital: KPIs (total rows, distinct procedures, payer/plan count, median/min/max rate), top procedures, and payer coverage. Reads from semantic fact and dims. |
-| **Data Quality** | Null-rate metrics, UNKNOWN billing_code_type count, coverage matrix (from `agg_payer_plan_compare`), procedure and payer variant flags, and top outlier rates. CSV/JSON export. |
-| **Hospital Comparison** | Compare min, max, and approximate median rates **by hospital** for a selected procedure, payer family, plan family, rate category, and rate unit. Uses `agg_hospital_procedure_compare`. Table and horizontal bar chart (matplotlib); CSV and PNG download. |
-| **Payer Plan Comparison** | Compare rates **by payer_family** and **plan_family** for a procedure and optional hospital filter. Uses `agg_payer_plan_compare`. Payer-level and plan-level tables and charts; CSV and PNG download. |
-| **Top Codes by Type** | QA-style view: top billing codes by row count from app-facing marts (valid codes only). Optional filters: billing code type, hospitals. Columns: billing_code, billing_code_type, canonical_description, row_count, hospitals_covered. CSV download. |
+| **Home** | Portfolio landing: project title, summary of the business problem and pipeline, platform architecture (MRF → ingestion → dbt/BigQuery → Looker Studio → Streamlit), what the project demonstrates, tech stack, and a call-to-action to the Executive BI Dashboard. No BigQuery required for Home to load. |
 | **Executive BI Dashboard** | Embedded Looker Studio report (iframe): executive CPT/MS-DRG comparisons, hospital-to-hospital pricing variation, harmonized payer/procedure groupings. Optional `LOOKER_STUDIO_EMBED_URL` in secrets or env; fallback URL used if unset. |
 
-Comparison pages (Hospital Comparison, Payer Plan Comparison) and the Data Quality coverage matrix **depend on the comparable and harmonized marts** (`fct_rates_comparable`, `fct_rates_comparable_harmonized`, `agg_hospital_procedure_compare`, `agg_payer_plan_compare`). If those are empty, run the recommended dbt sequence below to rebuild the semantic and comparison layers.
+**Archived pages** (Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison, Top Codes by Type) are moved to `apps/streamlit_app/pages_archive/` for reference or re-enablement. See that folder’s README. The same BigQuery/dbt marts still power Looker Studio and can power restored pages if needed.
 
 ---
 
@@ -206,16 +202,9 @@ dbt run --select diag_code_type_inventory diag_code_type_examples diag_code_type
 dbt test
 ```
 
-### Top Codes Page (Streamlit)
+### Archived Streamlit pages (Top Codes, Search & Compare, etc.)
 
-The **Top Codes by Type** page is a simple QA-style view:
-
-- **Data source:** `agg_hospital_procedure_compare` (valid codes only).
-- **Filters:** Billing code type (optional), hospitals (optional), max rows.
-- **Columns:** `billing_code`, `billing_code_type`, `canonical_description`, `row_count`, `hospitals_covered`.
-- **Download:** CSV of the current result.
-
-Use it to confirm top codes per type and that descriptions and counts look correct after normalization.
+The **Top Codes by Type** and other development/QA pages (Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison) are in `apps/streamlit_app/pages_archive/`. They can be restored by moving the desired file back into `pages/`. Top Codes used `agg_hospital_procedure_compare`; comparison pages used the comparable and harmonized marts.
 
 ---
 
@@ -385,7 +374,7 @@ Additional runbooks: [docs/runbook.md](docs/runbook.md), [docs/bigquery_publish.
 
 | Path | Purpose |
 |------|---------|
-| `apps/streamlit_app/` | Streamlit app: Home, Search & Compare, Hospital Profile, Data Quality, Hospital Comparison, Payer Plan Comparison, Executive BI Dashboard (Looker Studio). |
+| `apps/streamlit_app/` | Streamlit app: Home (portfolio landing), Executive BI Dashboard (Looker Studio). Archived pages in `pages_archive/`. |
 | `data/sample/` | Small sample CSV/JSON for quickstart (committed). |
 | `data/raw_drop/` | Raw file drop (gitignored). |
 | `dbt/` | dbt project; copy `profiles.template.yml` to `profiles.yml`. |
