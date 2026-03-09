@@ -1,6 +1,6 @@
 """
-Metabase Executive Dashboard: embed a Metabase dashboard in the portfolio app via iframe.
-URL is read from Streamlit secrets (METABASE_EMBED_URL) or environment variable; no hardcoded URL in app logic.
+Executive BI Dashboard: embed a Looker Studio dashboard in the portfolio app via iframe.
+URL is read from Streamlit secrets (LOOKER_STUDIO_EMBED_URL), environment variable, or fallback default.
 """
 from __future__ import annotations
 
@@ -11,44 +11,40 @@ import streamlit.components.v1 as components
 
 from lib import ui
 
+# Fallback embed URL when secrets/env are not set (production-friendly default for portfolio).
+DEFAULT_LOOKER_STUDIO_EMBED_URL = (
+    "https://lookerstudio.google.com/embed/reporting/c2676e11-d089-4281-b4f5-ea81f03603d1/page/RhcrF"
+)
+
 st.set_page_config(
-    page_title="Metabase Executive Dashboard",
+    page_title="Executive BI Dashboard",
     page_icon="📊",
     layout="wide",
 )
 ui.render_sidebar()
 
 # ---------------------------------------------------------------------------
-# Resolve embed URL: secrets > env; if missing, show warning and stop
+# Resolve embed URL: secrets > env > fallback default (always render if URL present)
 # ---------------------------------------------------------------------------
 embed_url: str | None = None
 try:
-    if "METABASE_EMBED_URL" in st.secrets:
-        embed_url = st.secrets["METABASE_EMBED_URL"]
+    if "LOOKER_STUDIO_EMBED_URL" in st.secrets:
+        embed_url = st.secrets["LOOKER_STUDIO_EMBED_URL"]
 except Exception:
     pass
 if not embed_url:
-    embed_url = os.getenv("METABASE_EMBED_URL")
-
+    embed_url = os.getenv("LOOKER_STUDIO_EMBED_URL")
 if not embed_url or not str(embed_url).strip():
-    st.warning(
-        "No Metabase embed URL configured. Set **METABASE_EMBED_URL** in Streamlit secrets "
-        "(.streamlit/secrets.toml) or as an environment variable to display the dashboard here."
-    )
-    st.info(
-        "See README.md for how to add METABASE_EMBED_URL. You can copy from "
-        ".streamlit/secrets.template.toml if present."
-    )
-    st.stop()
+    embed_url = DEFAULT_LOOKER_STUDIO_EMBED_URL
 
 embed_url = str(embed_url).strip()
 
 # ---------------------------------------------------------------------------
 # Title and caption
 # ---------------------------------------------------------------------------
-st.title("Metabase Executive Dashboard")
+st.title("Healthcare Pricing Executive Dashboard")
 st.caption(
-    "This page is the BI/dashboard layer of the project: Metabase dashboards embedded inside the Streamlit analytics product."
+    "This page is the BI/dashboard layer of the project, powered by Looker Studio and embedded inside the Streamlit analytics product."
 )
 
 # ---------------------------------------------------------------------------
@@ -60,7 +56,7 @@ with col1:
 with col2:
     st.metric("Subject Area", "Hospital Pricing")
 with col3:
-    st.metric("Powered By", "Metabase")
+    st.metric("Powered By", "Looker Studio")
 
 # ---------------------------------------------------------------------------
 # About this dashboard (expander)
@@ -70,13 +66,14 @@ with st.expander("About this dashboard", expanded=False):
 This dashboard shows:
 
 - **Executive-relevant CPT and MS-DRG comparisons** — Key procedure and DRG metrics for stakeholder review.
-- **Negotiated comparable rates across hospitals** — Like-to-like rates (negotiated, gross, cash, min/max) so comparisons are meaningful.
+- **Hospital-to-hospital pricing variation** — How rates for the same procedure and payer vary across facilities.
 - **Harmonized payer and procedure groupings** — Payer family, plan family, and canonical procedure descriptions from the pipeline marts.
-- **Metabase embedded inside Streamlit** — Part of the analytics product layer: one portfolio app with both interactive Streamlit pages and embedded Metabase dashboards.
+- **Dashboards built on curated BigQuery/dbt marts** — The same semantic and comparison marts that power the Streamlit search and comparison pages.
+- **Embedded inside Streamlit** — Part of the analytics product layer: one portfolio app with both interactive Streamlit pages and embedded Looker Studio dashboards.
     """)
 
 # ---------------------------------------------------------------------------
-# Embedded Metabase dashboard (height ~1450, scrolling enabled)
+# Embedded Looker Studio dashboard (width fills page, height 1400–1600, scrolling)
 # ---------------------------------------------------------------------------
-IFRAME_HEIGHT = 1450
+IFRAME_HEIGHT = 1500
 components.iframe(embed_url, height=IFRAME_HEIGHT, scrolling=True)
