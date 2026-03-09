@@ -47,7 +47,7 @@ hospitals_df = data.load_dim_hospital(data.get_mode())
 hospital_options: list[tuple[str, str]] = []
 if not hospitals_df.empty:
     if "hospital_id" in hospitals_df.columns:
-        display_col = "hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name"
+        display_col = "hospital_display_name" if "hospital_display_name" in hospitals_df.columns else ("hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name")
         if display_col in hospitals_df.columns:
             opts = hospitals_df[["hospital_id", display_col]].drop_duplicates()
             hospital_options = list(opts.itertuples(index=False, name=None))

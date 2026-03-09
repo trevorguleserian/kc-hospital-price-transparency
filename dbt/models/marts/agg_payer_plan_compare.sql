@@ -7,9 +7,8 @@
 }}
 
 /*
-  Payer/plan comparison: same grain as agg_hospital_procedure_compare. Selects only from agg_hospital_procedure_compare,
-  so rate_category='other' is excluded by upstream; no extra filter needed here.
-  Used by Streamlit Payer/Plan Comparison page to aggregate by payer_family or plan_family.
+  Payer/plan comparison: same grain as agg_hospital_procedure_compare. Selects only from agg_hospital_procedure_compare
+  (which already excludes rate_category='other' and invalid billing codes). Used by Streamlit Payer/Plan Comparison page.
 */
 select
   billing_code,

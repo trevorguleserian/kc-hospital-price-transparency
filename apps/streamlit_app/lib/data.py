@@ -110,9 +110,13 @@ def _read_local_table(table: str) -> pd.DataFrame:
 
 @st.cache_data
 def load_dim_hospital(_mode: Optional[str] = None) -> pd.DataFrame:
-    """Load dim_hospital from BigQuery; cached."""
+    """Load dim_hospital from BigQuery; cached. Adds hospital_display_name = hospital_name_clean for UI."""
     sql = f"SELECT * FROM {_bq_table('dim_hospital')}"
-    return _bq_query(sql)
+    df = _bq_query(sql)
+    if not df.empty and "hospital_name_clean" in df.columns:
+        df = df.copy()
+        df["hospital_display_name"] = df["hospital_name_clean"]
+    return df
 
 
 @st.cache_data
@@ -171,14 +175,21 @@ def get_hospital_comparison(
     where = " AND ".join(conditions)
     sql = f"""
     SELECT
+      a.hospital_id,
       COALESCE(d.hospital_name_clean, a.hospital_id) AS hospital_name_clean,
-      COALESCE(proc.canonical_description, '') AS canonical_description,
+      COALESCE(d.hospital_name_clean, a.hospital_id) AS hospital_display_name,
+      a.billing_code,
+      COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') AS billing_code_type,
+      COALESCE(proc.canonical_description, '') AS description,
+      a.payer_family,
+      a.plan_family,
+      a.rate_category,
+      a.rate_unit,
       a.min_rate,
       a.max_rate,
       a.approx_median_rate,
       a.row_count,
-      a.rate_category,
-      a.rate_unit
+      COALESCE(proc.canonical_description, '') AS canonical_description
     FROM {_bq_table('agg_hospital_procedure_compare')} a
     LEFT JOIN {_bq_table('dim_hospital')} d ON a.hospital_id = d.hospital_id
     LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
@@ -187,6 +198,50 @@ def get_hospital_comparison(
     ORDER BY a.approx_median_rate DESC
     """
     job_config = QueryJobConfig(query_parameters=params)
+    client = _bq_client()
+    return client.query(sql, job_config=job_config).to_dataframe()
+
+
+@st.cache_data
+def get_top_codes_by_type(
+    billing_code_type: Optional[str] = None,
+    hospital_ids: Optional[list[str]] = None,
+    limit: int = 100,
+) -> pd.DataFrame:
+    """
+    Top billing codes by row count from app-facing agg_hospital_procedure_compare (valid codes only).
+    Optional filter by billing_code_type and hospital_ids. Returns billing_code, billing_code_type,
+    canonical_description, row_count, hospitals_covered. Join to dim_procedure_harmonized for description.
+    """
+    from google.cloud.bigquery import ArrayQueryParameter, QueryJobConfig, ScalarQueryParameter
+
+    limit = max(1, min(int(limit), 500))
+    conditions = ["1 = 1"]
+    params: list = []
+    if billing_code_type and str(billing_code_type).strip():
+        conditions.append("COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = @billing_code_type")
+        params.append(ScalarQueryParameter("billing_code_type", "STRING", str(billing_code_type).strip()))
+    if hospital_ids:
+        conditions.append("a.hospital_id IN UNNEST(@hospital_ids)")
+        params.append(ArrayQueryParameter("hospital_ids", "STRING", hospital_ids))
+
+    where = " AND ".join(conditions)
+    sql = f"""
+    SELECT
+      a.billing_code,
+      COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') AS billing_code_type,
+      MAX(COALESCE(proc.canonical_description, '')) AS canonical_description,
+      SUM(a.row_count) AS row_count,
+      COUNT(DISTINCT a.hospital_id) AS hospitals_covered
+    FROM {_bq_table('agg_hospital_procedure_compare')} a
+    LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
+      ON a.billing_code = proc.billing_code AND COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
+    WHERE {where}
+    GROUP BY a.billing_code, a.billing_code_type
+    ORDER BY row_count DESC
+    LIMIT {limit}
+    """
+    job_config = QueryJobConfig(query_parameters=params) if params else None
     client = _bq_client()
     return client.query(sql, job_config=job_config).to_dataframe()
 
@@ -234,19 +289,23 @@ def get_payer_plan_compare_detail(
     where = " AND ".join(conditions)
     sql = f"""
     SELECT
+      a.hospital_id,
+      COALESCE(d.hospital_name_clean, a.hospital_id) AS hospital_name_clean,
+      COALESCE(d.hospital_name_clean, a.hospital_id) AS hospital_display_name,
       a.billing_code,
-      a.billing_code_type,
+      COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') AS billing_code_type,
+      COALESCE(proc.canonical_description, '') AS description,
       a.payer_family,
       a.plan_family,
       a.rate_category,
       a.rate_unit,
-      a.hospital_id,
       a.min_rate,
       a.max_rate,
       a.approx_median_rate,
       a.row_count,
       COALESCE(proc.canonical_description, '') AS canonical_description
     FROM {_bq_table('agg_payer_plan_compare')} a
+    LEFT JOIN {_bq_table('dim_hospital')} d ON a.hospital_id = d.hospital_id
     LEFT JOIN {_bq_table('dim_procedure_harmonized')} proc
       ON a.billing_code = proc.billing_code AND COALESCE(CAST(a.billing_code_type AS STRING), 'UNKNOWN') = proc.billing_code_type
     WHERE {where}
@@ -733,5 +792,60 @@ def get_local_exports_instructions() -> str:
 
 **Shortcut:** If Silver already exists, run `scripts/mvp_local.ps1` to build and export, then start Streamlit again.
 """
+
+
+def get_display_and_billing_diagnostic() -> pd.DataFrame:
+    """
+    Diagnostic: confirm hospital_name_clean is human-readable and billing_code 99213
+    appears normalized in app-facing tables. Returns one row per check with columns:
+    check_name, result_summary, sample_value, ok (bool).
+    """
+    rows = []
+    try:
+        # 1) dim_hospital: hospital_name_clean should not look like a hash (hex length 32)
+        sql_dh = f"""
+        SELECT hospital_id, hospital_name_clean
+        FROM {_bq_table('dim_hospital')}
+        LIMIT 5
+        """
+        df_dh = _bq_query(sql_dh)
+        if df_dh.empty:
+            rows.append({"check_name": "dim_hospital_sample", "result_summary": "no rows", "sample_value": None, "ok": False})
+        else:
+            sample = df_dh.iloc[0]
+            clean = str(sample.get("hospital_name_clean") or "")
+            looks_like_hash = len(clean) == 32 and all(c in "0123456789abcdef" for c in clean.lower())
+            rows.append({
+                "check_name": "dim_hospital_hospital_name_clean",
+                "result_summary": "hash-like" if looks_like_hash else "human-readable",
+                "sample_value": clean[:50] + ("..." if len(clean) > 50 else ""),
+                "ok": not looks_like_hash,
+            })
+
+        # 2) agg: billing_code 99213 should exist and be exactly '99213'
+        sql_agg = f"""
+        SELECT billing_code, billing_code_type, COUNT(*) AS cnt
+        FROM {_bq_table('agg_hospital_procedure_compare')}
+        WHERE TRIM(CAST(billing_code AS STRING)) = '99213'
+           OR TRIM(CAST(billing_code AS STRING)) LIKE '%99213%'
+        GROUP BY 1, 2
+        LIMIT 5
+        """
+        df_agg = _bq_query(sql_agg)
+        if df_agg.empty:
+            rows.append({"check_name": "billing_code_99213", "result_summary": "no 99213 rows", "sample_value": None, "ok": False})
+        else:
+            exact = df_agg[df_agg["billing_code"].astype(str).str.strip() == "99213"]
+            ok = not exact.empty
+            sample_val = df_agg["billing_code"].iloc[0] if not df_agg.empty else None
+            rows.append({
+                "check_name": "billing_code_99213_normalized",
+                "result_summary": "99213 exact" if ok else "99213 has variant (e.g. leading digit)",
+                "sample_value": str(sample_val),
+                "ok": ok,
+            })
+    except Exception as e:
+        rows.append({"check_name": "diagnostic_error", "result_summary": str(e), "sample_value": None, "ok": False})
+    return pd.DataFrame(rows)
 
 

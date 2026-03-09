@@ -35,7 +35,7 @@ if hospitals_df.empty:
     st.stop()
 
 if "hospital_id" in hospitals_df.columns:
-    display_col = "hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name"
+    display_col = "hospital_display_name" if "hospital_display_name" in hospitals_df.columns else ("hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name")
     if display_col not in hospitals_df.columns:
         display_col = hospitals_df.columns[1] if len(hospitals_df.columns) > 1 else hospitals_df.columns[0]
     opts = hospitals_df[["hospital_id", display_col]].drop_duplicates()

@@ -49,7 +49,7 @@ plan_families = ["— Select —"]
 hospital_options: list[tuple[str, str]] = []  # (hospital_id, display_label)
 if not hospitals_df.empty:
     if "hospital_id" in hospitals_df.columns:
-        display_col = "hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name"
+        display_col = "hospital_display_name" if "hospital_display_name" in hospitals_df.columns else ("hospital_name_clean" if "hospital_name_clean" in hospitals_df.columns else "hospital_name")
         if display_col in hospitals_df.columns:
             opts = hospitals_df[["hospital_id", display_col]].drop_duplicates()
             hospital_options = list(opts.itertuples(index=False, name=None))
@@ -149,8 +149,8 @@ if comparison_df is not None and not comparison_df.empty and st.session_state.ge
             st.caption(f"**Procedure:** {str(desc)[:200]}{'…' if len(str(desc)) > 200 else ''}")
     st.subheader("Comparison by hospital")
 
-    # 1) Table
-    display_cols = ["hospital_name_clean", "min_rate", "max_rate", "approx_median_rate", "row_count", "rate_category", "rate_unit"]
+    # 1) Table (use hospital_display_name from dim_hospital for clean labels)
+    display_cols = ["hospital_display_name", "min_rate", "max_rate", "approx_median_rate", "row_count", "rate_category", "rate_unit"]
     existing = [c for c in display_cols if c in comparison_df.columns]
     st.dataframe(comparison_df[existing], use_container_width=True)
 
@@ -164,15 +164,16 @@ if comparison_df is not None and not comparison_df.empty and st.session_state.ge
         mime="text/csv",
     )
 
-    # 2) Bar chart (approx_median_rate by hospital_name_clean; optional min/max whiskers)
+    # 2) Bar chart (approx_median_rate by hospital_display_name; optional min/max whiskers)
     st.subheader("Approximate median rate by hospital")
     plot_df = comparison_df.sort_values("approx_median_rate", ascending=True).dropna(subset=["approx_median_rate"])
+    label_col = "hospital_display_name" if "hospital_display_name" in plot_df.columns else "hospital_name_clean"
     if plot_df.empty:
         st.caption("No numeric median rates to plot.")
     else:
         fig, ax = plt.subplots(figsize=(10, max(4, len(plot_df) * 0.25)))
         x = range(len(plot_df))
-        labels = plot_df["hospital_name_clean"].astype(str).str[:40].tolist()
+        labels = plot_df[label_col].astype(str).str[:40].tolist()
         medians = plot_df["approx_median_rate"].values
         ax.barh(x, medians, color="steelblue", alpha=0.85, label="Approx. median")
         if "min_rate" in plot_df.columns and "max_rate" in plot_df.columns:

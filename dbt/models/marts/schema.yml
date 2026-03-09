@@ -162,16 +162,28 @@ models:
     tests: []
 
   - name: fct_rates_comparable
-    description: "All semantic rows with non-null rate_category and numeric rate_amount. rate_category normalized. is_comparable = FALSE for 'other'; comparison aggs filter to is_comparable = TRUE."
+    description: "All semantic rows with non-null rate_category and numeric rate_amount. rate_category normalized. Includes billing_code_raw, normalized billing_code, billing_code_is_valid, billing_code_issue_reason. Invalid codes not dropped; app aggs filter to valid only."
     columns:
       - name: hospital_id
         description: "Hospital identifier; join to dim_hospital."
         tests:
           - not_null
+      - name: billing_code_raw
+        description: "Original billing code from semantic layer."
       - name: billing_code
-        description: "Procedure/service code; join to dim_procedure."
+        description: "Normalized procedure/service code; join to dim_procedure."
         tests:
           - not_null
+      - name: billing_code_type
+        description: "Canonical code type (UPPER, hyphens to underscores)."
+        tests:
+          - not_null
+      - name: billing_code_is_valid
+        description: "True if code passes format validation for its type."
+        tests:
+          - not_null
+      - name: billing_code_issue_reason
+        description: "Format violation reason when invalid; null when valid."
       - name: rate_category
         description: "Normalized (LOWER(TRIM)); accepted values include 'other' (kept for diagnostics, is_comparable = FALSE)."
         tests:

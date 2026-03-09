@@ -7,15 +7,11 @@
 }}
 
 /*
-  Compiled SQL check: dbt/target/run/.../agg_hospital_procedure_compare.sql must contain
-  "where coalesce(is_comparable, false) = true and lower(trim(cast(rate_category as string))) != 'other'".
-  If the table in BQ still had other, the target was from an older run; full-refresh fixes it.
-
   Grain: (billing_code, billing_code_type, payer_family, plan_family, rate_category, rate_unit, comparability_key, hospital_id)
   One row per hospital per procedure/payer/plan/rate-type combination; metrics support hospital-to-hospital comparison.
-  Source: fct_rates_comparable_harmonized. Contract: only comparable rows; rate_category='other' must never appear.
-  We normalize rate_category (lower/trim) and hard-exclude other so casing/spacing cannot leak through.
-  coalesce(is_comparable, false) guards against nulls.
+  Source: fct_rates_comparable_harmonized. Contract: only comparable rows; rate_category='other' excluded.
+  Invalid billing codes are excluded here (billing_code_is_valid = true); they remain in fct_rates_comparable,
+  fct_rates_comparable_harmonized, and fct_billing_code_rejects for diagnostics.
 */
 
 with base as (
@@ -33,6 +29,7 @@ with base as (
   from {{ ref('fct_rates_comparable_harmonized') }}
   where coalesce(is_comparable, false) = true
     and lower(trim(cast(rate_category as string))) != 'other'
+    and coalesce(billing_code_is_valid, false) = true
 ),
 
 agg as (

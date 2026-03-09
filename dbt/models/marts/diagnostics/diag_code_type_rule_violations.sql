@@ -7,9 +7,10 @@
 }}
 
 /*
-  Diagnostic: rows where billing_code does not match expected format for its billing_code_type.
-  Uses centralized billing_code_issue_reason macro. Invalid codes are not dropped; see fct_billing_code_rejects.
-  Run: dbt run --select diag_billing_code_format_issues, then query this view.
+  Billing code audit: rows violating expected format rules by code type.
+  Returns billing_code_type, billing_code, issue_type, row_count.
+  Uses centralized billing_code_issue_reason macro.
+  Source: fct_standard_charges_semantic.
 */
 with base as (
   select
@@ -23,16 +24,16 @@ with_reason as (
   select
     billing_code,
     billing_code_type,
-    {{ billing_code_issue_reason('billing_code', 'billing_code_type') }} as issue_reason
+    {{ billing_code_issue_reason('billing_code', 'billing_code_type') }} as issue_type
   from base
 )
 
 select
-  billing_code,
   billing_code_type,
-  issue_reason,
+  billing_code,
+  issue_type,
   count(*) as row_count
 from with_reason
-where issue_reason is not null
-group by billing_code, billing_code_type, issue_reason
+where issue_type is not null
+group by 1, 2, 3
 order by row_count desc
